@@ -1,4 +1,6 @@
-FROM python:3.14-slim
+FROM python:3.10-slim
 WORKDIR /app
-COPY salvage.py .
-ENTRYPOINT ["python", "salvage.py"]
+COPY src/ ./src/
+COPY salvage ./salvage
+RUN chmod +x /app/salvage
+ENTRYPOINT ["/app/salvage"]

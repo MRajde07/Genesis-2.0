@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+"""Portable POSIX launcher for SALVAGE."""
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "src"))
+try:
+    from salvage.cli import main
+    raise SystemExit(main())
+except SystemExit:
+    raise
+except BaseException as exc:
+    print(f"SALVAGE: launcher failure: {type(exc).__name__}: {exc}")
+    raise SystemExit(0)

@@ -1,127 +1,73 @@
-# Genesis-2.0
-# SALVAGE — Binary File Recovery Toolkit
+# SALVAGE — Offline Binary Recovery CLI
 
-SALVAGE is an offline command-line prototype designed to identify binary file formats, decode known structures, detect truncated data, and report recovery results as JSON.
+SALVAGE is a standard-library-only Python 3.10+ CLI prototype for identifying file formats, decoding known structures through plugins, and reporting recovered data as deterministic JSON. The first decoder is the fictional `STUD` format from the original prototype. Unknown files use a conservative generic fallback and are not assigned invented content.
 
-> **Prototype notice:** The current implementation supports a fictional demonstration format called STUD. Support for the actual hackathon formats must be implemented after their specifications and sample files are released.
+## Run
 
-## Features
+POSIX / Linux:
 
-- **Offline processing:** Runs locally without requiring an internet connection.
-- **Signature detection:** Identifies the demo STUD format using its file signature.
-- **Structured extraction:** Extracts the version and name fields from valid STUD files.
-- **Damage handling:** Detects truncated headers and incomplete name fields.
-- **Unknown-format handling:** Reports unsupported files without stopping the entire batch.
-- **JSON output:** Generates a JSON result for each input file.
-- **Batch report:** Creates a report summarizing the files processed.
+```sh
+chmod +x ./salvage
+./salvage ./input_dir ./output_dir
+```
 
-## Requirements
+Windows Command Prompt or PowerShell:
 
-- Python 3.10 or newer
-- No third-party Python packages required
+```powershell
+.\salvage.cmd .\input_dir .\output_dir
+```
 
-## Project Structure
+Python is the only runtime dependency. The tool makes no network requests. It always returns process exit code `0`, including when the input directory is missing or processing fails; inspect `report.json` and per-file results to determine the outcome.
+
+## STUD sample
+
+```sh
+python -c "from pathlib import Path; Path('input_dir').mkdir(exist_ok=True); Path('input_dir/student.bin').write_bytes(b'STUD\\x01\\x03Anu')"
+./salvage ./input_dir ./output_dir
+```
+
+The STUD layout is a 4-byte `STUD` signature, one version byte, one name-length byte, and that many name bytes. Existing prototype behaviour is retained, including replacement decoding for invalid UTF-8 in STUD names. Damage ranges are zero-based, half-open byte offsets.
+
+## Output
+
+Each input gets `<input-name>.json`; the batch also gets `report.json`. JSON uses stable key order, indentation, ASCII escaping, and LF newlines. Unknown formats remain `UNKNOWN` with `unsupported` status. STUD results preserve the original `format`, `status`, `data`, and `errors` fields; the plugin pipeline may add a `damage` array when a byte range is known.
+
+## Plugin API
+
+Implement `FormatPlugin` from `src/salvage/formats/base.py`:
+
+- `detect(data: bytes) -> float`: confidence in `[0.0, 1.0]`.
+- `decode(data: bytes) -> Result`: return decoded records/data and a list of `Damage` items.
+
+Register plugins with `PluginRegistry`. The default registry checks STUD before the generic fallback. Detection exceptions and invalid confidence values are ignored; decoder exceptions are isolated to that file. Plugins must not claim data without evidence.
+
+## Tests
+
+```sh
+python -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+Or use `make test` where Make is available.
+
+## Repository layout
 
 ```text
-salvage_prototype/
-├── salvage.py
-├── README.md
-├── FORMAT_SPEC.md
-├── FIELD_LOG.md
-├── Dockerfile
-├── .gitignore
-├── input_dir/
-├── output_dir/
-├── tests/
-│   ├── __init__.py
-│   └── test_salvage.py
-└── docs/
-    ├── architecture.md
-    └── demo-notes.md
+salvage                 POSIX launcher
+salvage.cmd             Windows launcher
+src/salvage/            CLI, pipeline, identification, reporting and plugins
+src/salvage/analysis/   Analysis modules (incrementally implemented)
+src/salvage/formats/    Plugin API, registry, generic and STUD plugins
+src/salvage/tools/      Inspection utilities (incrementally implemented)
+tools/                  Sample, corruption and scoring utilities
+schema/                 Output schema
+ tests/                 Unit, integration, fuzz and golden tests
+FORMAT-SPEC.md          Format notes
+FIELD-LOG.md            Evidence and development log
 ```
 
-## Run SALVAGE
+## Limitations and assumptions
 
-From the project root, run:
-
-```powershell
-python salvage.py ./input_dir ./output_dir
-```
-
-The first argument is the input directory. The second argument is the output directory.
-
-SALVAGE processes regular files in the input directory and writes the results to the output directory.
-
-## Try the Demo
-
-Create a sample STUD file:
-
-```powershell
-python -c "from pathlib import Path; Path('input_dir/student.bin').write_bytes(b'STUD\x01\x03Anu')"
-```
-
-Run the program:
-
-```powershell
-python salvage.py ./input_dir ./output_dir
-```
-
-The sample contains the STUD signature, version `1`, a name length of `3`, and the name `Anu`.
-
-## Output Files
-
-For an input file named `student.bin`, SALVAGE creates:
-
-- `student.bin.json` — the individual processing result
-- `report.json` — the batch report containing results for all processed files
-
-Each individual result includes the filename, detected format, processing status, extracted data, and any reported errors.
-
-Possible statuses include:
-
-- `success` — the demo file was decoded successfully.
-- `partially_recovered` — some data was recovered, but a declared field was truncated.
-- `damaged` — the file was too short to contain the complete demo header.
-- `unsupported` — the signature was not recognized.
-- `error` — an input file could not be read or processed.
-
-## Run the Tests
-
-Run the automated test suite:
-
-```powershell
-python -m unittest discover -s tests -p "test_*.py" -v
-```
-
-The tests cover valid files, unknown formats, truncated files, empty files, and batch reporting.
-
-## Architecture
-
-1. Read command-line arguments.
-2. Validate the input directory and prepare the output directory.
-3. Scan input files in a deterministic order.
-4. Identify supported file signatures.
-5. Decode available fields and check field boundaries.
-6. Record errors and recovery status.
-7. Write per-file JSON results and the aggregate report.
-
-## Limitations
-
-- Only the fictional STUD demonstration format is currently supported.
-- The prototype does not yet implement the actual challenge formats.
-- It does not yet implement format-specific checksums, archive indexes, compression schemes, or advanced recovery.
-- The current output structure is provisional and must be adapted to the official hackathon JSON schema.
-
-## Development Roadmap
-
-1. Inspect official challenge samples and schemas.
-2. Implement format detection for each required format.
-3. Add format-specific decoders and integrity checks.
-4. Implement evidence-based recovery for damaged files.
-5. Match the official JSON schema exactly.
-6. Expand tests using valid, malformed, and truncated challenge samples.
-7. Validate offline execution and packaging.
-
-<!-- ## License
-
-Add the license required by the project or hackathon organizers. -->
+- Only STUD is a known format at this stage; the generic fallback deliberately does not infer fields.
+- A generic fallback cannot make arbitrary unknown or encrypted data semantically understandable.
+- The CLI attempts to handle errors without crashing, but operating-system failures can prevent output files from being written at all.
+- STUD's historical invalid-UTF-8 replacement behaviour is intentionally preserved for compatibility; future formats should preserve undecodable bytes instead of replacing them.
