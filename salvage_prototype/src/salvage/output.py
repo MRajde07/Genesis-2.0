@@ -6,6 +6,8 @@ this module's shaping without changing parsers or orchestration.
 from __future__ import annotations
 
 import json
+import math
+from functools import lru_cache
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -13,8 +15,90 @@ from typing import Any
 STATUS_VOCABULARY = ("recovered", "partial", "damaged", "unsupported", "error")
 
 
-def write_json(path: Path, value: Any) -> None:
-    path.write_text(json.dumps(value, indent=2, ensure_ascii=True, sort_keys=False) + "\n", encoding="utf-8", newline="\n")
+SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schema"
+
+
+class SchemaValidationError(ValueError):
+    """An output document did not satisfy the supported schema subset."""
+
+
+@lru_cache(maxsize=8)
+def load_schema(name: str = "result.schema.json") -> dict[str, Any]:
+    """Load a bundled local schema, without any remote resolution."""
+    if name not in ("result.schema.json", "report.schema.json"):
+        raise ValueError("unknown bundled schema")
+    return json.loads((SCHEMA_DIR / name).read_text(encoding="utf-8"))
+
+
+def validate_schema(value: Any, schema: dict[str, Any], path: str = "$") -> None:
+    """Validate a deliberately small JSON Schema subset (no external refs).
+
+    Supported: type, required, properties, items, enum, minimum, maximum,
+    additionalProperties, minItems, maxItems, minLength, maxLength.
+    Unknown schema keywords are rejected to avoid silently weakening validation.
+    """
+    allowed = {"$schema", "title", "description", "type", "required", "properties",
+               "items", "enum", "minimum", "maximum", "additionalProperties",
+               "minItems", "maxItems", "minLength", "maxLength"}
+    unsupported = set(schema) - allowed
+    if unsupported:
+        raise SchemaValidationError(f"{path}: unsupported schema keywords: {sorted(unsupported)}")
+    types = {"object": lambda v: isinstance(v, dict),
+             "array": lambda v: isinstance(v, list),
+             "string": lambda v: isinstance(v, str),
+             "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+             "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v),
+             "boolean": lambda v: isinstance(v, bool),
+             "null": lambda v: v is None}
+    declared = schema.get("type")
+    if declared is not None:
+        names = [declared] if isinstance(declared, str) else declared
+        if not isinstance(names, list) or not names or any(n not in types for n in names):
+            raise SchemaValidationError(f"{path}: unsupported type declaration")
+        if not any(types[n](value) for n in names):
+            raise SchemaValidationError(f"{path}: expected {names}")
+    if "enum" in schema and value not in schema["enum"]:
+        raise SchemaValidationError(f"{path}: value not in enum")
+    if isinstance(value, dict):
+        for key in schema.get("required", []):
+            if key not in value:
+                raise SchemaValidationError(f"{path}: missing required key {key!r}")
+        props = schema.get("properties", {})
+        for key, item in value.items():
+            if key in props:
+                validate_schema(item, props[key], f"{path}.{key}")
+            elif schema.get("additionalProperties", True) is False:
+                raise SchemaValidationError(f"{path}: unexpected key {key!r}")
+            elif isinstance(schema.get("additionalProperties"), dict):
+                validate_schema(item, schema["additionalProperties"], f"{path}.{key}")
+    if isinstance(value, list):
+        if "minItems" in schema and len(value) < schema["minItems"]:
+            raise SchemaValidationError(f"{path}: too few items")
+        if "maxItems" in schema and len(value) > schema["maxItems"]:
+            raise SchemaValidationError(f"{path}: too many items")
+        if "items" in schema:
+            for i, item in enumerate(value):
+                validate_schema(item, schema["items"], f"{path}[{i}]")
+    if isinstance(value, str):
+        if "minLength" in schema and len(value) < schema["minLength"]:
+            raise SchemaValidationError(f"{path}: string too short")
+        if "maxLength" in schema and len(value) > schema["maxLength"]:
+            raise SchemaValidationError(f"{path}: string too long")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if "minimum" in schema and value < schema["minimum"]:
+            raise SchemaValidationError(f"{path}: below minimum")
+        if "maximum" in schema and value > schema["maximum"]:
+            raise SchemaValidationError(f"{path}: above maximum")
+
+
+def write_json(path: Path, value: Any, *, schema_name: str | None = None) -> None:
+    """Validate before writing; serialize in a deterministic, portable form."""
+    if schema_name is None:
+        schema_name = "report.schema.json" if path.name == "report.json" else "result.schema.json"
+    validate_schema(value, load_schema(schema_name))
+    serialized = json.dumps(value, indent=2, ensure_ascii=True, sort_keys=True,
+                            allow_nan=False) + "\n"
+    path.write_text(serialized, encoding="utf-8", newline="\n")
 
 
 def _damage_dict(item: Any) -> dict[str, Any]:
@@ -132,7 +216,8 @@ def shape_failure_entry(path: str, stage: str, error: BaseException | str) -> di
 
 
 def shape_report(results: list[dict[str, Any]], failures: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    failures = list(failures or [])
+    failures = sorted(list(failures or []), key=lambda f: (str(f.get("path", "")), str(f.get("stage", "")), str(f.get("error", ""))))
+    results = sorted(results, key=lambda r: str(r.get("file_name", "")))
     counts = Counter(item.get("status", "error") for item in results)
     return {
         "tool": "SALVAGE",
@@ -145,4 +230,19 @@ def shape_report(results: list[dict[str, Any]], failures: list[dict[str, Any]] |
         "output_errors": [],
         "failures": failures,
         "results": results,
+        "files": [
+            {
+                "file_name": item.get("file_name", ""),
+                "format": item.get("format", "UNKNOWN"),
+                "confidence": next((candidate.get("confidence", 0.0)
+                                    for candidate in item.get("identification", [])
+                                    if candidate.get("selected")), 0.0),
+                "status": item.get("status", "error"),
+                "counts": item.get("counts", {"records_recovered": 0, "records_damaged": 0, "records_lost": 0}),
+                "byte_ranges": item.get("byte_ranges", []),
+                "warnings": [str(d.get("reason", "")) for d in item.get("damage", [])]
+                            + [str(e) for e in item.get("errors", [])],
+            }
+            for item in results
+        ],
     }

@@ -93,3 +93,7 @@ Implemented pure-function analysis helpers for windowed Shannon entropy and hist
 - Block offsets and checksum offsets are absolute file offsets. The default checksum coverage is the block excluding the stored checksum bytes.
 - Range endpoints are inclusive for field values; byte ranges are half-open.
 - Checks are diagnostic only. They do not repair data or imply a format is authentic.
+
+## Seeded invented formats and golden tests
+
+Added three deliberately invented fixture formats and corresponding plugins: ASTER (fixed records, big-endian), CRC_BLOCKS (little-endian blocks with CRC32), and XIDX (big-endian offset index, RLE blobs, XOR-obfuscated labels). `tools/gen_samples.py` is seeded and writes a ground-truth JSON next to each binary. Golden tests compare plugin output with the ground truth, check default registry selection, prove ASTER's `nominal_span` field is not used as a length, verify CRC failures are reported without correction, and check repeatability.

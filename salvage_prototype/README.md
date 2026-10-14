@@ -1,6 +1,6 @@
 # SALVAGE — Offline Binary Recovery CLI
 
-SALVAGE is a standard-library-only Python 3.10+ CLI prototype for identifying file formats, decoding known structures through plugins, and reporting recovered data as deterministic JSON. The first decoder is the fictional `STUD` format from the original prototype. Unknown files use a conservative generic fallback and are not assigned invented content.
+SALVAGE is a standard-library-only Python 3.10+ CLI prototype for identifying file formats, decoding known structures through plugins, and reporting recovered data as deterministic JSON. Known decoders include the original fictional `STUD` format plus invented ASTER, CRC_BLOCKS, and XIDX formats used to exercise fixed records, CRC-protected blocks, index tables, RLE, and XOR decoding. Unknown files use a conservative generic fallback and are not assigned invented content.
 
 ## Run
 
@@ -32,6 +32,17 @@ The STUD layout is a 4-byte `STUD` signature, one version byte, one name-length 
 
 Each input gets `<input-name>.json`; the batch also gets `report.json`. JSON uses stable key order, indentation, ASCII escaping, and LF newlines. Unknown formats remain `UNKNOWN` with `unsupported` status. STUD results preserve the original `format`, `status`, `data`, and `errors` fields; the plugin pipeline may add a `damage` array when a byte range is known.
 
+
+
+## Seeded format fixtures
+
+Generate three invented binary fixtures and adjacent ground-truth JSON using only the standard library:
+
+```sh
+python tools/gen_samples.py --output-dir samples/generated --seed 1337
+```
+
+The formats intentionally vary byte order: ASTER uses big-endian fixed records and includes a length-looking field that is not a length; CRC_BLOCKS uses little-endian block lengths and CRC32; XIDX uses a big-endian offset index with RLE-compressed blobs and XOR-obfuscated strings. The `.truth.json` files are checked by the golden tests. See `FORMAT-SPEC.md` for exact layouts.
 
 ## Unknown-format analysis
 
@@ -81,7 +92,7 @@ FIELD-LOG.md            Evidence and development log
 
 ## Limitations and assumptions
 
-- Only STUD is a known format at this stage; the generic fallback deliberately does not infer fields.
+- The bundled fictional formats are test fixtures, not real-world format support; the generic fallback deliberately does not infer fields.
 - A generic fallback cannot make arbitrary unknown or encrypted data semantically understandable.
 - The CLI attempts to handle errors without crashing, but operating-system failures can prevent output files from being written at all.
 - STUD's historical invalid-UTF-8 replacement behaviour is intentionally preserved for compatibility; future formats should preserve undecodable bytes instead of replacing them.

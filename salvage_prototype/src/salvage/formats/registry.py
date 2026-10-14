@@ -4,11 +4,14 @@ from __future__ import annotations
 from .base import FormatPlugin
 from .generic import GenericPlugin
 from .stud import STUDPlugin
+from .real import AsterRecordsPlugin, CRCBlocksPlugin, XIDXPlugin
 
 
 class PluginRegistry:
     def __init__(self, plugins: list[FormatPlugin] | None = None):
-        self._plugins: list[FormatPlugin] = list(plugins or [STUDPlugin(), GenericPlugin()])
+        self._plugins: list[FormatPlugin] = list(plugins or [
+            STUDPlugin(), AsterRecordsPlugin(), CRCBlocksPlugin(), XIDXPlugin(), GenericPlugin()
+        ])
 
     def register(self, plugin: FormatPlugin) -> None:
         self._plugins.append(plugin)

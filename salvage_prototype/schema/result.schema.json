@@ -2,41 +2,146 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "SALVAGE per-file result",
   "type": "object",
-  "required": ["file_name", "format", "status", "data", "records", "counts", "damage", "byte_ranges", "errors"],
+  "required": [
+    "file_name",
+    "format",
+    "status",
+    "data",
+    "records",
+    "counts",
+    "damage",
+    "byte_ranges",
+    "errors"
+  ],
   "properties": {
-    "file_name": {"type": "string"},
-    "format": {"type": "string"},
-    "status": {"enum": ["recovered", "partial", "damaged", "unsupported", "error"]},
+    "file_name": {
+      "type": "string"
+    },
+    "format": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "recovered",
+        "partial",
+        "damaged",
+        "unsupported",
+        "error"
+      ]
+    },
     "data": {},
-    "records": {"type": "array", "items": {"type": "object"}},
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
     "counts": {
       "type": "object",
-      "required": ["records_recovered", "records_damaged", "records_lost"],
+      "required": [
+        "records_recovered",
+        "records_damaged",
+        "records_lost"
+      ],
       "properties": {
-        "records_recovered": {"type": "integer", "minimum": 0},
-        "records_damaged": {"type": "integer", "minimum": 0},
-        "records_lost": {"type": "integer", "minimum": 0}
+        "records_recovered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "records_damaged": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "records_lost": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
     },
-    "damage": {"type": "array", "items": {
-      "type": "object",
-      "required": ["field", "offset", "expected", "found", "reason", "byte_range"],
-      "properties": {
-        "field": {"type": "string"},
-        "offset": {"type": "integer", "minimum": 0},
-        "expected": {"type": "integer", "minimum": 0},
-        "found": {"type": "integer", "minimum": 0},
-        "reason": {"type": "string"},
-        "byte_range": {"type": "object", "required": ["start", "end"], "properties": {
-          "start": {"type": "integer", "minimum": 0},
-          "end": {"type": "integer", "minimum": 0}
-        }, "additionalProperties": false}
-      },
-      "additionalProperties": false
-    }},
-    "byte_ranges": {"type": "array", "items": {"type": "object", "required": ["start", "end"], "properties": {"start": {"type": "integer", "minimum": 0}, "end": {"type": "integer", "minimum": 0}}, "additionalProperties": false}},
-    "errors": {"type": "array", "items": {"type": "string"}}
+    "damage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "field",
+          "offset",
+          "expected",
+          "found",
+          "reason",
+          "byte_range"
+        ],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "expected": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "found": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string"
+          },
+          "byte_range": {
+            "type": "object",
+            "required": [
+              "start",
+              "end"
+            ],
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "raw_hex": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "byte_ranges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "start",
+          "end"
+        ],
+        "properties": {
+          "start": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
   },
   "additionalProperties": true
 }

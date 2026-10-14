@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SALVAGE batch report placeholder",
+  "type": "object",
+  "required": [
+    "tool",
+    "files_processed",
+    "status_counts",
+    "records_recovered",
+    "records_damaged",
+    "records_lost",
+    "failures",
+    "results",
+    "files"
+  ],
+  "properties": {
+    "tool": {
+      "type": "string"
+    },
+    "files_processed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "status_vocabulary": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "status_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "records_recovered": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "records_damaged": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "records_lost": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "output_errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "file_name",
+          "format",
+          "confidence",
+          "status",
+          "counts",
+          "warnings",
+          "byte_ranges"
+        ],
+        "properties": {
+          "file_name": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "status": {
+            "enum": [
+              "recovered",
+              "partial",
+              "damaged",
+              "unsupported",
+              "error"
+            ]
+          },
+          "counts": {
+            "type": "object"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "byte_ranges": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

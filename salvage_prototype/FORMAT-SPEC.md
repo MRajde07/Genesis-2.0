@@ -53,3 +53,34 @@ Date conventions: DOS date/time use the conventional packed 16-bit DOS fields; U
 `BlockSpec` can be passed to `decode_fields(..., blocks=[...])` or `FormatPlugin.decode_spec(..., blocks=[...])`. It defines an absolute `offset`, `length`, and optionally a `checksum_offset`, `checksum_type`, `checksum_length`, `checksum_endianness`, and explicit `checksum_range`. Supported checksum algorithms are `crc32`, `crc16` (Modbus/IBM reflected), `crc16_ccitt`, `sum8`, `sum16`, `xor8`, and `fletcher16`. With no explicit coverage range, the checksum is calculated across the block excluding its stored checksum bytes. Block and checksum bounds are validated before verification. A failed check records the reason, affected byte range, stored/calculated values where available, and raw hexadecimal bytes; the input is never corrected.
 
 Validator failures for ranges and enumerations preserve raw field bytes as `raw_hex` in damage diagnostics. The `minimum`/`maximum` checks are inclusive, and `enum_values` is an explicit set/list of allowed decoded values. All byte offsets and ranges remain zero-based and half-open.
+
+## Invented golden-test formats
+
+`tools/gen_samples.py` generates three fictional formats using only the Python standard library. The generator accepts `--seed` and writes a `.truth.json` file beside each binary fixture. These formats are local test fixtures, not claims about real-world legacy formats.
+
+### ASTER (`ARCF`)
+
+- Header: ASCII magic `ARCF`, 16-bit big-endian version, 16-bit big-endian record count.
+- Records: fixed 12-byte records, big-endian numeric fields: `item_id:u16`, `kind:u8`, `nominal_span:u16`, `quantity:u16`, `score:i16`, and a three-byte ASCII `code`.
+- `nominal_span` is intentionally a misleading length-looking category value. It is never used to calculate record boundaries; record boundaries are determined by the fixed 12-byte record size.
+
+### CRC_BLOCKS (`CRCB`)
+
+- Header: magic `CRCB`, one-byte version, 16-bit little-endian block count.
+- Each block: 16-bit little-endian payload length, payload, and little-endian CRC32 of the payload.
+- Payload: little-endian `sequence:u16`, little-endian signed `reading:i32`, one-byte UTF-8 label length, then label bytes.
+
+### XIDX (`XIDX`)
+
+- Header: magic `XIDX`, one-byte version, one-byte entry count, 16-bit big-endian index-table offset.
+- Index entries are 10 bytes: big-endian blob offset, packed length, decoded length, and label offset (each `u16`), then label length and XOR key (`u8` each).
+- Blobs use count/value RLE pairs. Labels are UTF-8 bytes XOR-obfuscated with the entry's single-byte key.
+- Offsets are absolute from the beginning of the file. Table and target bounds are validated before interpretation.
+
+Generate fixtures with:
+
+```sh
+python tools/gen_samples.py --output-dir samples/generated --seed 1337
+```
+
+Each `.bin.truth.json` is the fixture's expected decoded data and is used by `tests/golden/test_real_format_golden.py` to check decoder results exactly.
