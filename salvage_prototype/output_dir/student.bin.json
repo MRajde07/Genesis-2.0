@@ -1,0 +1,10 @@
+{
+  "file_name": "student.bin",
+  "format": "STUD",
+  "status": "success",
+  "data": {
+    "version": 1,
+    "name": "Anu"
+  },
+  "errors": []
+}

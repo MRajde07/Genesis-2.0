@@ -1,0 +1,45 @@
+{
+  "tool": "SALVAGE",
+  "files_processed": 3,
+  "status_counts": {
+    "success": 1,
+    "partially_recovered": 1,
+    "damaged": 0,
+    "unsupported": 1,
+    "error": 0
+  },
+  "output_errors": [],
+  "results": [
+    {
+      "file_name": "damaged.bin",
+      "format": "STUD",
+      "status": "partially_recovered",
+      "data": {
+        "version": 1,
+        "name": "Al"
+      },
+      "errors": [
+        "Name was truncated: expected 5 bytes, found 2"
+      ]
+    },
+    {
+      "file_name": "student.bin",
+      "format": "STUD",
+      "status": "success",
+      "data": {
+        "version": 1,
+        "name": "Anu"
+      },
+      "errors": []
+    },
+    {
+      "file_name": "unkown.bin",
+      "format": "UNKNOWN",
+      "status": "unsupported",
+      "data": null,
+      "errors": [
+        "Unrecognized file signature"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "file_name": "damaged.bin",
+  "format": "STUD",
+  "status": "partially_recovered",
+  "data": {
+    "version": 1,
+    "name": "Al"
+  },
+  "errors": [
+    "Name was truncated: expected 5 bytes, found 2"
+  ]
+}
