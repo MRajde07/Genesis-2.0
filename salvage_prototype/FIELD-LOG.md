@@ -54,3 +54,24 @@ Move the single-file prototype into a standard-library-only package while preser
 ## Generic analysis modules
 
 Implemented pure-function analysis helpers for windowed Shannon entropy and histograms; ASCII, UTF-16LE/BE and CP437 strings with offsets; endian-aware integer scans; candidate length fields; fixed-size record hypotheses; CRC16/CRC32, sum8/sum16, XOR and Fletcher checksum guesses; single-byte and repeating-key XOR hypotheses; and count/value RLE detection/decoding. Added `tools/probe.py` and `tools/hexview.py`. The generic fallback includes bounded findings and explicitly labels inferred structures as unverified. Heuristics can produce false positives, especially for CP437 strings, record sizes, checksum coincidences, XOR and RLE.
+
+## 2026-10-15 — Declarative field-spec engine
+
+### Implemented
+
+- Added `FieldSpec`, `FieldDecode`, `decode_fields`, and `FormatPlugin.decode_spec` in `formats/base.py`.
+- Added endian-aware signed/unsigned integers, IEEE-754 floats, fixed and length-prefixed strings, fixed bytes/signatures, packed DOS date/time, UTC Unix timestamps, BCD, Julian Day Number conversion, arrays, and index tables with optional offset-based target record decoding.
+- Added declarative validators (`nonzero`, `positive`, `min:N`, `max:N`, `one_of:...`, or callable predicates).
+- Short reads preserve available data and emit structured damage entries with zero-based half-open byte ranges. Partial record data remains available.
+- Re-expressed STUD using `FieldSpec` declarations while preserving valid output shape and strict UTF-8 behavior.
+- Added field-spec tests for types, endianness, truncated strings, dates/timestamps, BCD, arrays/index tables, validators, and STUD compatibility.
+
+### Assumptions / unverified
+
+- Float fields are IEEE-754 binary32/binary64.
+- DOS datetime bytes are packed date then packed time, using the configured endianness.
+- Unix timestamps are unsigned seconds from the Unix epoch and are displayed in UTC.
+- `julian_date` treats the integer as a Julian Day Number and maps it to an ISO date; challenge formats may use a different epoch or fractional convention.
+- Length-prefixed strings use an integer prefix specified by `prefix_type` (default `u8`).
+- Index tables default to unsigned 32-bit entries; `offset_from` adjusts offsets, and target records are decoded only when `target_fields` are supplied.
+- The field engine is standard-library-only. Platform-specific Windows and Docker verification remains outstanding.

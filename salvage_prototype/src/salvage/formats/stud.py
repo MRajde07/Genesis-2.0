@@ -1,11 +1,15 @@
-"""Decoder for the STUD demonstration format.
-
-Layout: 4-byte signature, 1-byte version, 1-byte UTF-8 name length, name bytes.
-"""
+"""STUD decoder expressed with the declarative field-spec engine."""
 from __future__ import annotations
 
-from ..reader import ByteReader
-from .base import Damage, FormatPlugin, Result
+from .base import Damage, FieldSpec, FormatPlugin, Result, decode_fields
+
+
+STUD_FIELDS = (
+    FieldSpec("signature", "fixed_bytes", length=4, validators=(lambda value: value == "53545544",)),
+    FieldSpec("version", "u8", validators=("positive",)),
+    FieldSpec("name_length", "u8", validators=("positive",)),
+    FieldSpec("name", "fixed_string", length_source="name_length", encoding="utf-8"),
+)
 
 
 class STUDPlugin(FormatPlugin):
@@ -14,61 +18,45 @@ class STUDPlugin(FormatPlugin):
     header_length = 6
 
     def detect(self, data: bytes) -> float:
-        # Detection is a signature clue, not proof of a valid STUD structure.
         return 1.0 if data.startswith(self.signature) else 0.0
 
     def plausible_fields(self, data: bytes) -> dict[str, object]:
         if len(data) < self.header_length:
             return {"valid": False, "detail": "STUD header is truncated"}
-        version = data[4]
-        name_length = data[5]
+        version, name_length = data[4], data[5]
         available = len(data) - self.header_length
-        # Version zero is treated as implausible; name truncation is reported
-        # separately but remains a plausible damaged STUD record.
         valid = version > 0 and name_length > 0
         detail = (f"version={version}, name_length={name_length}, "
-                  f"available_name_bytes={available}; "
-                  f"name {'fits' if name_length <= available else 'is truncated'}")
+                  f"available_name_bytes={available}; name "
+                  f"{'fits' if name_length <= available else 'is truncated'}")
         return {"valid": valid, "detail": detail}
 
     def decode(self, data: bytes) -> Result:
         result = Result(format="STUD", status="recovered")
-        reader = ByteReader(data, endian="big")
-        header = reader.read(6, field="header")
-        if len(header) < 6:
+        # Keep the legacy output shape exactly: signature is structural only;
+        # name is strictly decoded and invalid bytes are preserved as hex.
+        decoded = decode_fields(data, STUD_FIELDS, endian="big")
+        values = decoded.values
+        if len(data) < 6:
             result.status = "damaged"
-            result.damage.extend(reader.damage)
+            result.damage.extend(item.to_dict() for item in decoded.damage)
             return result
-
-        version = header[4]
-        name_length = header[5]
-        name_offset = 6
-        name_bytes = reader.read(name_length, field="name")
-        name_damage = list(reader.damage)
-        try:
-            name = name_bytes.decode("utf-8", errors="strict")
-            result.data = {"version": version, "name": name}
-        except UnicodeDecodeError as error:
-            # Preserve the bytes exactly. Never inject U+FFFD replacement chars.
-            bad_start = name_offset + error.start
-            bad_end = name_offset + max(error.end, error.start + 1)
-            result.data = {
-                "version": version,
-                "name": None,
-                "name_raw_hex": name_bytes.hex(),
-                "name_decode_error": "invalid UTF-8",
-            }
-            result.damage.append(Damage(
-                field="name", offset=bad_start, expected=bad_end - bad_start,
-                found=bad_end - bad_start, reason="invalid UTF-8; raw bytes preserved as hex",
-                byte_range=(bad_start, bad_end),
-            ))
+        version = values.get("version")
+        name_length = values.get("name_length")
+        raw_name = data[6:min(len(data), 6 + (name_length or 0))]
+        name_value = values.get("name")
+        if isinstance(name_value, dict) and name_value.get("encoding_error"):
+            result.data = {"version": version, "name": None, "name_raw_hex": raw_name.hex(),
+                           "name_decode_error": "invalid UTF-8"}
+            # Declarative decoder already reported invalid encoding; refine to legacy wording/range.
+            invalid = [d for d in decoded.damage if d.field == "name" and "invalid encoding" in d.reason]
+            for item in invalid:
+                item.reason = "invalid UTF-8; raw bytes preserved as hex"
             result.status = "damaged"
-
+        else:
+            result.data = {"version": version, "name": name_value}
         result.records.append(dict(result.data))
-        # These diagnostics are the exact structured entries emitted by the
-        # bounds-checked reader; output.py adds normalized byte_range objects.
-        result.damage.extend(name_damage)
-        if name_damage:
-            result.status = "partial" if result.status == "recovered" else "damaged"
+        result.damage.extend(item.to_dict() for item in decoded.damage)
+        if result.damage and result.status == "recovered":
+            result.status = "partial"
         return result
