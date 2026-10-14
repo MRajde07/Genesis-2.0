@@ -27,9 +27,11 @@ class PluginTests(unittest.TestCase):
 
     def test_stud_damage_has_byte_range(self):
         result = STUDPlugin().decode(b"STUD\x01\x05Al")
-        self.assertEqual(result.status, "partially_recovered")
-        self.assertEqual(result.damage[0].start, 8)
-        self.assertEqual(result.damage[0].end, 11)
+        self.assertEqual(result.status, "partial")
+        self.assertEqual(result.damage[0]["field"], "name")
+        self.assertEqual(result.damage[0]["offset"], 8)
+        self.assertEqual(result.damage[0]["expected"], 5)
+        self.assertEqual(result.damage[0]["found"], 2)
 
 
 if __name__ == "__main__":

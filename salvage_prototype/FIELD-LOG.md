@@ -30,3 +30,22 @@ Move the single-file prototype into a standard-library-only package while preser
 - Generic fallback intentionally returns no extracted content because no structure is supported by evidence.
 - The full hidden hackathon format set is not available yet.
 - Cross-platform Windows execution and Docker image build must be verified in their target environments.
+
+
+## 2026-10-15 — Structured damage and output shaping
+
+### Implemented
+
+- STUD parsing now uses `ByteReader` for bounds-checked header and name reads. Reader diagnostics are retained as structured damage entries instead of being flattened into error strings.
+- Output shaping is centralized in `src/salvage/output.py`; the pipeline and report module delegate to it.
+- Adopted the status vocabulary `recovered`, `partial`, `damaged`, `unsupported`, and `error`.
+- Per-file output includes `counts.records_recovered`, `counts.records_damaged`, `counts.records_lost`, structured `damage`, and normalized `byte_ranges`. The batch report aggregates statuses and record counts.
+- Invalid UTF-8 names are not decoded with replacement. The name is `null`, exact bytes are returned in `name_raw_hex`, and the damaged byte range is reported.
+- Added output-shaping tests for complete STUD, truncated names, invalid UTF-8 and counts.
+
+### Counting assumptions
+
+- Counts are mutually exclusive: complete records increment recovered; records with any byte or text-decoding damage increment damaged; a known damaged record that could not be reconstructed at all increments lost.
+- Unsupported files do not increment record-lost counts because the number or structure of their records is unknown.
+- Byte ranges are zero-based and half-open. For missing bytes, the range represents the absent interval; for invalid UTF-8, it identifies the invalid sequence.
+- Windows execution and the Docker build have not been verified in this run.

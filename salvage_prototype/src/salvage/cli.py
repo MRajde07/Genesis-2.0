@@ -5,14 +5,13 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from .output import write_json
+from .output import shape_failure, shape_failure_entry, write_json
 from .pipeline import inspect_file
 from .report import build_report
 
 
 def _failure(path: Path | str, stage: str, error: BaseException | str) -> dict[str, Any]:
-    detail = f"{type(error).__name__}: {error}" if isinstance(error, BaseException) else str(error)
-    return {"path": str(path), "status": "error", "stage": stage, "error": detail}
+    return shape_failure_entry(str(path), stage, error)
 
 
 def main(argv: list[str] | None = None, *, registry=None) -> int:
@@ -63,13 +62,9 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
                     if not isinstance(result, dict):
                         raise TypeError("file processor did not return a result object")
                 except Exception as error:
-                    result = {
-                        "file_name": entry.name,
-                        "format": "UNKNOWN",
-                        "status": "error",
-                        "data": None,
-                        "errors": [f"Unexpected file processing failure: {type(error).__name__}: {error}"],
-                    }
+                    result = shape_failure(entry.name, "UNKNOWN",
+                                           f"Unexpected file processing failure: {type(error).__name__}: {error}",
+                                           field="process_file")
                     failures.append(_failure(entry, "process_file", error))
                 if result.get("status") == "error" and not any(
                     item.get("path") == str(entry) and item.get("stage") == "process_file"

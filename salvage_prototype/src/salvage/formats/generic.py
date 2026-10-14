@@ -10,5 +10,4 @@ class GenericPlugin(FormatPlugin):
         return 0.01
 
     def decode(self, data: bytes) -> Result:
-        return Result(format="UNKNOWN", status="unsupported",
-                      errors=["Unrecognized file signature"])
+        return Result(format="UNKNOWN", status="unsupported")

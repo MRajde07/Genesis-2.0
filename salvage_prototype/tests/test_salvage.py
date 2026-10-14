@@ -27,7 +27,7 @@ class SalvageTests(unittest.TestCase):
             self.assertEqual(process.returncode, 0, process.stderr)
             result = json.loads((output_dir / "student.bin.json").read_text(encoding="utf-8"))
             self.assertEqual(result["format"], "STUD")
-            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["status"], "recovered")
             self.assertEqual(result["data"]["name"], "Anu")
 
     def test_unknown_file(self):
@@ -48,8 +48,8 @@ class SalvageTests(unittest.TestCase):
             self.assertEqual(process.returncode, 0, process.stderr)
             result = json.loads((output_dir / "damaged.bin.json").read_text(encoding="utf-8"))
             self.assertEqual(result["format"], "STUD")
-            self.assertEqual(result["status"], "partially_recovered")
-            self.assertTrue(result["errors"])
+            self.assertEqual(result["status"], "partial")
+            self.assertTrue(result["damage"])
 
     def test_empty_file(self):
         with tempfile.TemporaryDirectory() as temp:
