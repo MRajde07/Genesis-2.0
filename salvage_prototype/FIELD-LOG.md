@@ -49,3 +49,8 @@ Move the single-file prototype into a standard-library-only package while preser
 - Unsupported files do not increment record-lost counts because the number or structure of their records is unknown.
 - Byte ranges are zero-based and half-open. For missing bytes, the range represents the absent interval; for invalid UTF-8, it identifies the invalid sequence.
 - Windows execution and the Docker build have not been verified in this run.
+
+
+## Generic analysis modules
+
+Implemented pure-function analysis helpers for windowed Shannon entropy and histograms; ASCII, UTF-16LE/BE and CP437 strings with offsets; endian-aware integer scans; candidate length fields; fixed-size record hypotheses; CRC16/CRC32, sum8/sum16, XOR and Fletcher checksum guesses; single-byte and repeating-key XOR hypotheses; and count/value RLE detection/decoding. Added `tools/probe.py` and `tools/hexview.py`. The generic fallback includes bounded findings and explicitly labels inferred structures as unverified. Heuristics can produce false positives, especially for CP437 strings, record sizes, checksum coincidences, XOR and RLE.

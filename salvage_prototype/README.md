@@ -32,6 +32,20 @@ The STUD layout is a 4-byte `STUD` signature, one version byte, one name-length 
 
 Each input gets `<input-name>.json`; the batch also gets `report.json`. JSON uses stable key order, indentation, ASCII escaping, and LF newlines. Unknown formats remain `UNKNOWN` with `unsupported` status. STUD results preserve the original `format`, `status`, `data`, and `errors` fields; the plugin pipeline may add a `damage` array when a byte range is known.
 
+
+## Unknown-format analysis
+
+The generic fallback performs bounded, heuristic analysis of up to the first 64 KiB: windowed Shannon entropy, a 256-bin byte histogram, printable strings (ASCII, UTF-16LE/BE and CP437), endian-aware integer candidates, candidate length fields, fixed-size record hypotheses, checksum matches (CRC16/CRC32, sum, XOR and Fletcher), XOR hypotheses, and count/value RLE hypotheses. Candidate interpretations are marked `unverified`; they are evidence for further investigation, not a claim that the file format has been decoded. Expensive checksum and XOR searches use smaller bounded samples.
+
+Inspect a file directly with:
+
+```sh
+python tools/probe.py path/to/file.bin
+python tools/hexview.py path/to/file.bin
+```
+
+The analysis helpers are pure functions in `src/salvage/analysis/` and use only the Python standard library. Heuristic confidence values are ranking signals, not calibrated probabilities. RLE and XOR outputs are candidate transformations and should not be trusted without independent structural validation.
+
 ## Plugin API
 
 Implement `FormatPlugin` from `src/salvage/formats/base.py`:
@@ -55,10 +69,10 @@ Or use `make test` where Make is available.
 salvage                 POSIX launcher
 salvage.cmd             Windows launcher
 src/salvage/            CLI, pipeline, identification, reporting and plugins
-src/salvage/analysis/   Analysis modules (incrementally implemented)
+src/salvage/analysis/   Entropy, strings, integers, records, checksums, XOR and RLE heuristics
 src/salvage/formats/    Plugin API, registry, generic and STUD plugins
-src/salvage/tools/      Inspection utilities (incrementally implemented)
-tools/                  Sample, corruption and scoring utilities
+src/salvage/tools/      Probe and annotated hex-view utilities
+tools/                  Sample, corruption, scoring, probe and hex-view utilities
 schema/                 Output schema
  tests/                 Unit, integration, fuzz and golden tests
 FORMAT-SPEC.md          Format notes
