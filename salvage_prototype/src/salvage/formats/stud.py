@@ -10,9 +10,26 @@ from .base import Damage, FormatPlugin, Result
 
 class STUDPlugin(FormatPlugin):
     name = "STUD"
+    signature = b"STUD"
+    header_length = 6
 
     def detect(self, data: bytes) -> float:
-        return 1.0 if data.startswith(b"STUD") else 0.0
+        # Detection is a signature clue, not proof of a valid STUD structure.
+        return 1.0 if data.startswith(self.signature) else 0.0
+
+    def plausible_fields(self, data: bytes) -> dict[str, object]:
+        if len(data) < self.header_length:
+            return {"valid": False, "detail": "STUD header is truncated"}
+        version = data[4]
+        name_length = data[5]
+        available = len(data) - self.header_length
+        # Version zero is treated as implausible; name truncation is reported
+        # separately but remains a plausible damaged STUD record.
+        valid = version > 0 and name_length > 0
+        detail = (f"version={version}, name_length={name_length}, "
+                  f"available_name_bytes={available}; "
+                  f"name {'fits' if name_length <= available else 'is truncated'}")
+        return {"valid": valid, "detail": detail}
 
     def decode(self, data: bytes) -> Result:
         result = Result(format="STUD", status="recovered")

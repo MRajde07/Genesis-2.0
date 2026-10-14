@@ -17,19 +17,10 @@ class PluginRegistry:
     def plugins(self) -> tuple[FormatPlugin, ...]:
         return tuple(self._plugins)
 
-    def select(self, data: bytes) -> FormatPlugin:
-        best: FormatPlugin | None = None
-        best_confidence = -1.0
-        for plugin in self._plugins:
-            try:
-                confidence = float(plugin.detect(data))
-                if not 0.0 <= confidence <= 1.0:
-                    confidence = 0.0
-            except Exception:
-                confidence = 0.0
-            if confidence > best_confidence:
-                best, best_confidence = plugin, confidence
-        return best if best is not None else GenericPlugin()
+    def select(self, data: bytes, threshold: float = 0.55) -> FormatPlugin:
+        # Local import avoids a module cycle: identify consumes the registry.
+        from ..identify import select_plugin
+        return select_plugin(data, registry=self, threshold=threshold)
 
 
 def default_registry() -> PluginRegistry:

@@ -66,7 +66,8 @@ def _status(status: Any) -> str:
     return normalized if normalized in STATUS_VOCABULARY else "error"
 
 
-def shape_result(file_name: str, decoded: Any, *, fallback_format: str = "UNKNOWN") -> dict[str, Any]:
+def shape_result(file_name: str, decoded: Any, *, fallback_format: str = "UNKNOWN",
+                 identification: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Convert an internal plugin Result to the stable per-file JSON schema."""
     raw_damage = list(getattr(decoded, "damage", []) or [])
     damage = [_damage_dict(item) for item in raw_damage]
@@ -102,6 +103,13 @@ def shape_result(file_name: str, decoded: Any, *, fallback_format: str = "UNKNOW
         "byte_ranges": [item["byte_range"] for item in damage],
         "errors": [str(item) for item in (getattr(decoded, "errors", []) or [])],
     }
+    if identification is not None:
+        # Candidate dictionaries may carry a live plugin reference for internal
+        # dispatch. Never leak that object into JSON output.
+        result["identification"] = [
+            {key: value for key, value in candidate.items() if key != "plugin"}
+            for candidate in identification
+        ]
     return result
 
 
