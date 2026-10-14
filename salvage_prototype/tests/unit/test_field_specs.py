@@ -81,5 +81,47 @@ class DeclarativeFieldSpecTests(unittest.TestCase):
         self.assertIn("validator failed", result.damage[0].reason)
 
 
+    def test_block_crc32_valid_and_mismatch_preserves_raw_bytes(self):
+        import zlib
+        from salvage.formats.base import BlockSpec
+        payload = b"ABC"
+        good = payload + (zlib.crc32(payload) & 0xffffffff).to_bytes(4, "little")
+        fields = [FieldSpec("tag", "fixed_string", length=3)]
+        ok = decode_fields(good, fields, blocks=[BlockSpec("header", 0, len(good), 3, "crc32", 4)])
+        self.assertEqual(ok.damage, [])
+        self.assertTrue(ok.blocks[0]["checksum"]["valid"])
+        damaged = bytearray(good)
+        damaged[0] ^= 1
+        bad = decode_fields(bytes(damaged), fields, blocks=[BlockSpec("header", 0, len(good), 3, "crc32", 4)])
+        self.assertTrue(any("checksum mismatch" in d.reason for d in bad.damage))
+        entry = next(d for d in bad.damage if "checksum mismatch" in d.reason)
+        self.assertEqual(entry.byte_range, (3, 7))
+        self.assertTrue(entry.raw_hex)
+        self.assertEqual(bad.values["tag"], "@BC")  # observed bytes are not silently corrected
+
+    def test_block_and_checksum_bounds_are_checked(self):
+        from salvage.formats.base import BlockSpec
+        result = decode_fields(b"abc", [], blocks=[BlockSpec("short", 0, 9, 7, "crc32", 4)])
+        self.assertTrue(any("block bounds" in d.reason for d in result.damage))
+        self.assertTrue(any("checksum field bounds" in d.reason for d in result.damage))
+
+    def test_field_range_and_enum_checks_keep_raw_bytes(self):
+        result = decode_fields(b"\x09\x03", [
+            FieldSpec("level", "u8", minimum=1, maximum=5),
+            FieldSpec("kind", "u8", enum_values=(1, 2)),
+        ])
+        self.assertEqual(result.values, {"level": 9, "kind": 3})
+        self.assertEqual(len(result.damage), 2)
+        self.assertEqual(result.damage[0].raw_hex, "09")
+        self.assertEqual(result.damage[1].raw_hex, "03")
+        self.assertIn("maximum:5", result.damage[0].reason)
+        self.assertIn("enum", result.damage[1].reason)
+
+    def test_explicit_field_offset_out_of_bounds_is_damage(self):
+        result = decode_fields(b"abc", [FieldSpec("far", "u32", offset=8)])
+        self.assertIsNone(result.values["far"])
+        self.assertIn("field offset out of range", result.damage[0].reason)
+
+
 if __name__ == "__main__":
     unittest.main()

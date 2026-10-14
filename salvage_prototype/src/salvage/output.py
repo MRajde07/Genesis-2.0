@@ -48,6 +48,8 @@ def _damage_dict(item: Any) -> dict[str, Any]:
     else:
         start = end = offset
     shaped["byte_range"] = {"start": start, "end": end}
+    if raw.get("raw_hex") is not None:
+        shaped["raw_hex"] = str(raw["raw_hex"])
     return shaped
 
 

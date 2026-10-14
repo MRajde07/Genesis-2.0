@@ -75,3 +75,21 @@ Implemented pure-function analysis helpers for windowed Shannon entropy and hist
 - Length-prefixed strings use an integer prefix specified by `prefix_type` (default `u8`).
 - Index tables default to unsigned 32-bit entries; `offset_from` adjusts offsets, and target records are decoded only when `target_fields` are supplied.
 - The field engine is standard-library-only. Platform-specific Windows and Docker verification remains outstanding.
+
+
+## 2026-10-15 — Field and block integrity checks
+
+### Implemented
+
+- Added `BlockSpec` to validate absolute block offsets and lengths and optionally verify stored checksums/CRCs.
+- Added standard-library checksum verification for CRC32, CRC16/Modbus, CRC16-CCITT, sum8, sum16, XOR8, and Fletcher16. A checksum field is excluded from the default coverage range; a caller may specify an explicit range.
+- Added inclusive `FieldSpec.minimum` / `maximum`, `enum_values`, and `max_length` checks while retaining existing validator expressions.
+- Failed field, block, and checksum checks generate structured damage with byte ranges and preserve raw bytes as hex where applicable. No values or source bytes are silently corrected.
+- Added tests for valid and failing CRC32, checksum and block bounds, field range/enum failures, raw byte preservation, and out-of-range field offsets.
+
+### Assumptions / unverified
+
+- `crc16` means reflected CRC-16/Modbus (initial value 0xFFFF); `crc16_ccitt` uses polynomial 0x1021 and initial value 0xFFFF. Legacy formats may use different initial values, reflection, or final XOR.
+- Block offsets and checksum offsets are absolute file offsets. The default checksum coverage is the block excluding the stored checksum bytes.
+- Range endpoints are inclusive for field values; byte ranges are half-open.
+- Checks are diagnostic only. They do not repair data or imply a format is authentic.

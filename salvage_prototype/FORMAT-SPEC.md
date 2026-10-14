@@ -44,3 +44,12 @@ Supported field types include `u8/u16/u32`, `i8/i16/i32`, `f32/f64` (also `float
 The STUD plugin now declares its signature, version, name length and UTF-8 name using this engine. Its externally visible `data` and `records` shape for valid files remains `{ "version": 1, "name": "Anu" }` for the canonical sample; the signature remains structural and is not added to the result object. Invalid UTF-8 is preserved as hex, not replacement text.
 
 Date conventions: DOS date/time use the conventional packed 16-bit DOS fields; Unix timestamps are unsigned seconds rendered in UTC; `julian_date` interprets an unsigned integer as a Julian Day Number and returns an ISO Gregorian date. These conventions must be checked against the target format's actual specification before use.
+
+
+### Field bounds, validators, and block checksums
+
+`FieldSpec` also accepts `minimum`, `maximum`, `enum_values`, and `max_length`. Failed checks add structured damage and preserve the observed decoded value; they never clamp, replace, or repair the source bytes. A configured `max_length` is a validation limit only: the reader still attempts a bounded read of the declared field and reports truncation or the limit violation.
+
+`BlockSpec` can be passed to `decode_fields(..., blocks=[...])` or `FormatPlugin.decode_spec(..., blocks=[...])`. It defines an absolute `offset`, `length`, and optionally a `checksum_offset`, `checksum_type`, `checksum_length`, `checksum_endianness`, and explicit `checksum_range`. Supported checksum algorithms are `crc32`, `crc16` (Modbus/IBM reflected), `crc16_ccitt`, `sum8`, `sum16`, `xor8`, and `fletcher16`. With no explicit coverage range, the checksum is calculated across the block excluding its stored checksum bytes. Block and checksum bounds are validated before verification. A failed check records the reason, affected byte range, stored/calculated values where available, and raw hexadecimal bytes; the input is never corrected.
+
+Validator failures for ranges and enumerations preserve raw field bytes as `raw_hex` in damage diagnostics. The `minimum`/`maximum` checks are inclusive, and `enum_values` is an explicit set/list of allowed decoded values. All byte offsets and ranges remain zero-based and half-open.
