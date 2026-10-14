@@ -1,122 +1,126 @@
-# SALVAGE Format Specification
+# SALVAGE Format Specifications
 
-## Scope
+This document describes parser behaviour, not a guarantee that every file matching a signature is authentic. **Confirmed** means the layout is established by the local prototype/generator and covered by tests, or explicitly supported by the parser's synthetic fixtures. For Lotus WKS, parser mechanics are synthetically tested but real-file interoperability is not yet confirmed. **Unverified** means the interpretation is heuristic, raw-only, convention-dependent, or has not been validated against independent real samples.
 
-This document describes the fictional STUD format used to test the initial plugin architecture. It is not an official hackathon format.
+## Status vocabulary and byte ranges
 
-## STUD binary layout
+Statuses are `recovered`, `partial`, `damaged`, `unsupported`, and `error`. Byte offsets and ranges are zero-based; ranges are half-open (`[start, end)`). Damage diagnostics do not repair or overwrite source bytes. Unknown-format findings are leads, not decoded facts.
 
-| Offset | Size | Field | Description |
-|---:|---:|---|---|
-| 0 | 4 bytes | Signature | ASCII bytes `STUD` |
-| 4 | 1 byte | Version | Unsigned byte |
-| 5 | 1 byte | Name length | Number of bytes declared for the name |
-| 6 | Variable | Name | Name bytes; decoded strictly as UTF-8, with raw hex preserved if invalid |
+## STUD
 
-Offsets are zero-based. The name length is a byte count. The valid sample `53 54 55 44 01 03 41 6E 75` contains version 1 and name `Anu`.
+The original prototype format. The structural signature is omitted from the valid result data for compatibility.
 
-## Status rules
+| Field | Layout / interpretation | Evidence status | Notes |
+|---|---|---|---|
+| `signature` | Offset 0, 4 bytes, ASCII `STUD` | Confirmed | Required for detection; structural field, not emitted in `data`. |
+| `version` | Offset 4, unsigned 8-bit integer | Confirmed | Positive values pass the declarative validator. |
+| `name_length` | Offset 5, unsigned 8-bit byte count | Confirmed | Must be positive; counts encoded bytes, not Unicode characters. |
+| `name` | Offset 6, `name_length` bytes, strict UTF-8 | Confirmed | Valid text returned as `name`; invalid UTF-8 yields `name: null`, `name_raw_hex`, and damage. |
+| Valid result shape | `data: {version, name}` | Confirmed | Canonical sample `53 54 55 44 01 03 41 6e 75` yields version 1 and `Anu`. |
 
-- Unrecognized signature: `unsupported`.
-- `STUD` signature but fewer than six bytes: `damaged`.
-- Declared name length larger than available bytes: `partial` when available bytes decode, otherwise `damaged`.
-- Invalid UTF-8 name bytes: `damaged`; `name` is `null`, `name_raw_hex` preserves the exact bytes, and no replacement characters are inserted.
-- Complete valid name: `recovered`.
+## ASTER (`ARCF`) — invented test format
 
-The output status vocabulary is exactly `recovered`, `partial`, `damaged`, `unsupported`, and `error`. Damage entries contain `field`, `offset`, `expected`, `found`, and `reason`; output shaping adds a zero-based, half-open `byte_range`. Per-file `counts` separates complete records recovered, records damaged, and records lost. Counts do not guess the number of records in unsupported files.
+The generator and golden tests define this local synthetic format; it is not a claim about an external format.
 
-For truncation, byte ranges are zero-based and half-open. No checksum, compression, or archive index is defined by this toy format. Do not apply these assumptions to challenge formats without evidence.
+| Field | Layout / interpretation | Evidence status | Notes |
+|---|---|---|---|
+| `magic` | Offset 0, 4 bytes `ARCF` | Confirmed | Local generator and decoder agree. |
+| `version` | Offset 4, unsigned 16-bit big-endian | Confirmed | Synthetic fixture contract. |
+| `record_count` | Offset 6, unsigned 16-bit big-endian | Confirmed | Declares number of fixed-size records. |
+| Record size | 12 bytes per record | Confirmed | Record boundaries use fixed size, not `nominal_span`. |
+| `item_id` | Record +0, unsigned 16-bit big-endian | Confirmed | Synthetic fixture field. |
+| `kind` | Record +2, unsigned 8-bit | Confirmed | Meaning beyond stored category is fixture-defined. |
+| `nominal_span` | Record +3, unsigned 16-bit big-endian | Confirmed | Deliberately misleading length-looking value; not a record length. |
+| `quantity` | Record +5, unsigned 16-bit big-endian | Confirmed | Synthetic fixture field. |
+| `score` | Record +7, signed 16-bit big-endian | Confirmed | Synthetic fixture field. |
+| `code` | Record +9, 3-byte ASCII | Confirmed | Invalid/partial bytes are handled by decoder diagnostics. |
 
-## Plugin contract
+## CRC_BLOCKS (`CRCB`) — invented test format
 
-A `FormatPlugin` provides `detect(data) -> confidence` in the range 0..1 and `decode(data) -> Result`. A `Result` contains records, damage, format, status, data and errors. The registry evaluates plugins deterministically in registration order and selects the highest valid confidence. The generic fallback has low nonzero confidence and returns unsupported without fabricating content.
+The generator and golden tests define this local synthetic format.
+
+| Field | Layout / interpretation | Evidence status | Notes |
+|---|---|---|---|
+| `magic` | Offset 0, 4 bytes `CRCB` | Confirmed | Local fixture contract. |
+| `version` | Offset 4, unsigned 8-bit | Confirmed | Synthetic fixture field. |
+| `block_count` | Offset 5, unsigned 16-bit little-endian | Confirmed | Declares block count. |
+| `payload_length` | Each block begins with unsigned 16-bit little-endian length | Confirmed | Length of payload only. |
+| `payload.sequence` | Payload +0, unsigned 16-bit little-endian | Confirmed | Requires sufficient payload bytes. |
+| `payload.reading` | Payload +2, signed 32-bit little-endian | Confirmed | Requires sufficient payload bytes. |
+| `payload.label_length` | Payload +6, unsigned 8-bit | Confirmed | Byte count for UTF-8 label. |
+| `payload.label` | Payload +7, declared number of UTF-8 bytes | Confirmed | Synthetic fixture contract; malformed/truncated labels are damaged. |
+| `stored_crc32` | Four bytes after payload, little-endian CRC32 | Confirmed | Computed over payload bytes; mismatch is diagnostic only. |
+
+## XIDX (`XIDX`) — invented test format
+
+The generator and golden tests define this local synthetic format.
+
+| Field | Layout / interpretation | Evidence status | Notes |
+|---|---|---|---|
+| `magic` | Offset 0, 4 bytes `XIDX` | Confirmed | Local fixture contract. |
+| `version` | Offset 4, unsigned 8-bit | Confirmed | Generator emits version 1. |
+| `entry_count` | Offset 5, unsigned 8-bit | Confirmed | Number of 10-byte index entries. |
+| `index_offset` | Offset 6, unsigned 16-bit big-endian | Confirmed | Absolute file offset. |
+| `blob_offset` | Entry +0, unsigned 16-bit big-endian | Confirmed | Absolute offset to packed RLE bytes. |
+| `packed_length` | Entry +2, unsigned 16-bit big-endian | Confirmed | Length of packed blob. |
+| `decoded_length` | Entry +4, unsigned 16-bit big-endian | Confirmed | Required RLE output length. |
+| `label_offset` | Entry +6, unsigned 16-bit big-endian | Confirmed | Absolute offset to XOR-encoded label. |
+| `label_length` | Entry +8, unsigned 8-bit | Confirmed | Encoded label byte count. |
+| `xor_key` | Entry +9, unsigned 8-bit | Confirmed | Each encoded label byte is XORed with this value. |
+| Blob encoding | Count/value RLE byte pairs | Confirmed | Zero count, odd packed length, overflow and length mismatch are errors. |
+| Label text | XOR-decoded bytes interpreted as strict UTF-8 | Confirmed | Confirmed for the invented fixture contract only. |
+
+## Lotus 1-2-3 Release 1A `.WKS`
+
+The parser targets the BOF revision `0x0404`. Synthetic parser tests pass, but the integration test skips when no real `.wks` sample is available. Accordingly, the record framing and decoded byte operations below are **implementation-confirmed**; compatibility with arbitrary real-world files remains unverified.
+
+| Field / record | Layout / interpretation | Evidence status | Notes |
+|---|---|---|---|
+| BOF opcode | Offset 0, unsigned 16-bit little-endian, value `0x0000` | Confirmed in implementation; real-file validation unverified | First record only is accepted as the supported signature. |
+| BOF body length | Offset 2, unsigned 16-bit little-endian, value 2 | Confirmed in implementation; real-file validation unverified | Signature checks the exact six-byte prefix. |
+| BOF revision | Offset 4, unsigned 16-bit little-endian, value `0x0404` | Confirmed in implementation; real-file validation unverified | Other revisions are not claimed as supported. |
+| Record envelope | 16-bit LE opcode, 16-bit LE body length, then body | Confirmed in implementation; real-file validation unverified | Truncation yields structured damage. |
+| INTEGER cell header | Body byte 0 format; bytes 1–2 column; bytes 3–4 row, both unsigned LE 16-bit | Confirmed in implementation; real-file validation unverified | Coordinates are retained and rendered as one-based `R#C#` addresses. |
+| INTEGER value | Body bytes 5–6, signed LE 16-bit | Confirmed in implementation; real-file validation unverified | Body minimum is 7 bytes. |
+| NUMBER value | Body bytes 5–12, LE IEEE-754 binary64 | Confirmed in implementation; real-file validation unverified | Body minimum is 13 bytes. |
+| LABEL text | Body byte 5 prefix, remaining bytes text; CP437 decode | Implementation behaviour confirmed; prefix semantics unverified | Raw bytes and prefix are retained. Prefix/alignment interpretation is not a general guarantee. |
+| FORMULA cached value | Body bytes 5–12, LE IEEE-754 binary64 | Confirmed in implementation; real-file validation unverified | Body minimum is 15 bytes. |
+| FORMULA token length and stream | Token length and remaining token bytes are preserved by the parser | Raw preservation confirmed; token semantics unverified | No formula translation or evaluation; `formula_text` is null. |
+| Cell format byte | Body byte 0 | Confirmed as raw byte; meaning unverified | Display/date/currency semantics are not inferred. |
+| RANGE | First 8 body bytes parsed as four LE 16-bit coordinate values | Raw parse confirmed; coordinate meaning unverified | Output explicitly labels the interpretation unverified. |
+| EOF | Opcode `0x0001`; parser expects empty body | Confirmed in implementation; real-file validation unverified | Missing EOF or trailing bytes produce diagnostics. |
+| Unknown records | Opcode, declared length and body hex | Raw preservation confirmed; meaning unverified | Unknown records cause partial status and are never semantically decoded. |
+
+## Generic / unknown files
+
+There is no universal field layout for unknown files. The generic fallback does not claim to decode a schema.
+
+| Finding | Method / interpretation | Evidence status | Notes |
+|---|---|---|---|
+| Byte histogram | Counts of byte values | Confirmed computation | Descriptive statistics only. |
+| Windowed entropy | Shannon entropy over bounded windows | Confirmed computation | Does not prove encryption or compression. |
+| Printable strings | ASCII, UTF-16LE/BE and CP437 candidates with offsets | Heuristic / unverified | False positives are expected. |
+| Integer candidates | Endian-aware numeric scans | Heuristic / unverified | Candidate values are not field definitions. |
+| Length fields / record sizes | Plausible lengths and repeated-size hypotheses | Heuristic / unverified | Require independent structural confirmation. |
+| Checksums | CRC16/CRC32, sum, XOR and Fletcher candidates | Heuristic / unverified | Coincidental matches are possible. |
+| XOR / RLE | Single/repeating-key XOR and count/value RLE candidates | Heuristic / unverified | Transformations are not trusted without validation. |
+
+## Shared declarative field engine (not a file format)
+
+These are parser capabilities, not evidence that a target format uses a given convention.
+
+| Capability / field type | Behaviour | Evidence status | Notes |
+|---|---|---|---|
+| Integer and float types | Signed/unsigned 8/16/32-bit integers and IEEE-754 `f32`/`f64` | Confirmed implementation | Endianness is explicit/configurable. |
+| Fixed bytes / strings | Fixed-length bytes or decoded string | Confirmed implementation | Encoding must be selected for the target format. |
+| Length-prefixed string | Prefix type defaults to `u8` | Default confirmed; format convention unverified | Target format must define prefix width and encoding. |
+| DOS date/time | Packed DOS date and time | Implementation convention confirmed; target convention unverified | Must be validated per format. |
+| Unix timestamp | Unsigned seconds from epoch, rendered UTC | Implementation convention confirmed; target convention unverified | Other units/epochs are possible. |
+| BCD / Julian date | BCD decoding / integer Julian Day Number conversion | Implementation convention confirmed; target convention unverified | Formats may use alternate conventions. |
+| Arrays / index tables | Configurable count/item type and offsets | Implementation confirmed; target layout unverified | Index entries are decoded only according to supplied specs. |
+| Field validators | Range, enum and predicate checks | Confirmed implementation | Diagnostic only; values are not repaired. |
+| Block checksums | CRC32, CRC16/Modbus, CRC16-CCITT, sum8/sum16, XOR8, Fletcher16 | Confirmed implementation | Algorithm parameters and coverage must match the target specification. |
 
 ## Official challenge formats
 
-Add format descriptions only after validating field offsets, lengths, endianness, checksums and recovery behaviour against official samples or specifications.
-
-## Declarative field-spec engine
-
-`src/salvage/formats/base.py` provides `FieldSpec`, `decode_fields`, and `FormatPlugin.decode_spec`. Field specs are decoded in order; optional absolute offsets are relative to the record's starting offset. A short field yields the bytes/value available plus a structured `Damage` entry, and decoding continues where possible. The engine accepts `FieldSpec` instances or dictionaries with matching keys.
-
-Supported field types include `u8/u16/u32`, `i8/i16/i32`, `f32/f64` (also `float`/`double` aliases), `fixed_bytes`, `fixed_string`, `length_prefixed_string`, `dos_date`, `dos_time`, `dos_datetime`, `unix_timestamp`, `bcd`, `julian_date`, `array`, and `index_table`. Fields can specify `endianness`, `length`, `length_source`, `encoding`, `validators`, array `count` / `item_type` / `item_size`, and index-table `offset_from` / `target_fields`. Validators support `nonzero`, `positive`, `min:N`, `max:N`, `one_of:a,b`, and callables.
-
-The STUD plugin now declares its signature, version, name length and UTF-8 name using this engine. Its externally visible `data` and `records` shape for valid files remains `{ "version": 1, "name": "Anu" }` for the canonical sample; the signature remains structural and is not added to the result object. Invalid UTF-8 is preserved as hex, not replacement text.
-
-Date conventions: DOS date/time use the conventional packed 16-bit DOS fields; Unix timestamps are unsigned seconds rendered in UTC; `julian_date` interprets an unsigned integer as a Julian Day Number and returns an ISO Gregorian date. These conventions must be checked against the target format's actual specification before use.
-
-
-### Field bounds, validators, and block checksums
-
-`FieldSpec` also accepts `minimum`, `maximum`, `enum_values`, and `max_length`. Failed checks add structured damage and preserve the observed decoded value; they never clamp, replace, or repair the source bytes. A configured `max_length` is a validation limit only: the reader still attempts a bounded read of the declared field and reports truncation or the limit violation.
-
-`BlockSpec` can be passed to `decode_fields(..., blocks=[...])` or `FormatPlugin.decode_spec(..., blocks=[...])`. It defines an absolute `offset`, `length`, and optionally a `checksum_offset`, `checksum_type`, `checksum_length`, `checksum_endianness`, and explicit `checksum_range`. Supported checksum algorithms are `crc32`, `crc16` (Modbus/IBM reflected), `crc16_ccitt`, `sum8`, `sum16`, `xor8`, and `fletcher16`. With no explicit coverage range, the checksum is calculated across the block excluding its stored checksum bytes. Block and checksum bounds are validated before verification. A failed check records the reason, affected byte range, stored/calculated values where available, and raw hexadecimal bytes; the input is never corrected.
-
-Validator failures for ranges and enumerations preserve raw field bytes as `raw_hex` in damage diagnostics. The `minimum`/`maximum` checks are inclusive, and `enum_values` is an explicit set/list of allowed decoded values. All byte offsets and ranges remain zero-based and half-open.
-
-## Invented golden-test formats
-
-`tools/gen_samples.py` generates three fictional formats using only the Python standard library. The generator accepts `--seed` and writes a `.truth.json` file beside each binary fixture. These formats are local test fixtures, not claims about real-world legacy formats.
-
-### ASTER (`ARCF`)
-
-- Header: ASCII magic `ARCF`, 16-bit big-endian version, 16-bit big-endian record count.
-- Records: fixed 12-byte records, big-endian numeric fields: `item_id:u16`, `kind:u8`, `nominal_span:u16`, `quantity:u16`, `score:i16`, and a three-byte ASCII `code`.
-- `nominal_span` is intentionally a misleading length-looking category value. It is never used to calculate record boundaries; record boundaries are determined by the fixed 12-byte record size.
-
-### CRC_BLOCKS (`CRCB`)
-
-- Header: magic `CRCB`, one-byte version, 16-bit little-endian block count.
-- Each block: 16-bit little-endian payload length, payload, and little-endian CRC32 of the payload.
-- Payload: little-endian `sequence:u16`, little-endian signed `reading:i32`, one-byte UTF-8 label length, then label bytes.
-
-### XIDX (`XIDX`)
-
-- Header: magic `XIDX`, one-byte version, one-byte entry count, 16-bit big-endian index-table offset.
-- Index entries are 10 bytes: big-endian blob offset, packed length, decoded length, and label offset (each `u16`), then label length and XOR key (`u8` each).
-- Blobs use count/value RLE pairs. Labels are UTF-8 bytes XOR-obfuscated with the entry's single-byte key.
-- Offsets are absolute from the beginning of the file. Table and target bounds are validated before interpretation.
-
-Generate fixtures with:
-
-```sh
-python tools/gen_samples.py --output-dir samples/generated --seed 1337
-```
-
-Each `.bin.truth.json` is the fixture's expected decoded data and is used by `tests/golden/test_real_format_golden.py` to check decoder results exactly.
-
-## Corruption and scoring utilities
-
-`tools/corrupt.py INPUT_DIR OUTPUT_DIR --seed N --per-type K` generates deterministic mutated copies using four operations: suffix truncation at a seeded random offset, a single-bit flip, zeroing a contiguous block, and swapping adjacent bytes. It writes `manifest.json` containing the source file, output filename, mutation kind, byte range, seed and original/mutated lengths. The ground-truth sidecars are not copied into the mutation corpus.
-
-`tools/score.py TRUTH_DIR RESULTS_DIR` compares per-file output JSON against `*.truth.json` fixtures and prints a table with exact field matches and format decisions. `--json PATH` additionally writes a machine-readable summary. Field accuracy counts exact leaf-value matches over expected leaves; format detection precision and recall use exact format-name matches across the fixture set.
-
-The fuzz tests execute the actual CLI subprocess for every seeded mutation and require exit code zero, parseable per-file JSON and `report.json`, and ground-truth equality for non-null fields whose source bytes and framing dependencies were not mutated. This distinction is intentional: in a format without checksums, parity, or redundant data, a bit-flipped value may remain structurally valid and cannot be identified as corrupt from the bytes alone.
-
-## Lotus 1-2-3 Release 1A `.WKS` support
-
-`LOTUS_WKS` recognizes the Release 1A stream whose first record is BOF opcode
-`0x0000`, body length `2`, and little-endian revision `0x0404`. Records use a
-little-endian 16-bit opcode, 16-bit body length, then the body. The reader is
-stdlib-only and focuses on cell records: INTEGER (`0x000D`), NUMBER (`0x000E`),
-LABEL (`0x000F`), and FORMULA (`0x0010`). It also preserves RANGE metadata and
-unknown records.
-
-- INTEGER values are decoded as signed 16-bit little-endian integers.
-- NUMBER values are decoded as little-endian IEEE-754 binary64 values.
-- LABEL values preserve the prefix byte and raw bytes; text is decoded as
-  CP437, which maps all byte values. The alignment meaning of known prefixes
-  is reported, while unknown prefixes are flagged.
-- FORMULA cells preserve the cached numeric value and the token stream as hex.
-  Formula tokens are not evaluated or translated; `formula_text` is null and
-  `formula_evaluated` is false to avoid inventing an expression.
-- The cell format byte is retained raw. Display formatting/date semantics are
-  not inferred.
-- Unknown record bodies are preserved as hex and marked unverified.
-- Truncated records, missing EOF, unexpected trailing bytes, malformed cells,
-  and unsupported interpretations produce damage entries with byte ranges.
-
-This decoder intentionally does not claim full fidelity for formatting, names,
-macros, formula token translation, or every control record. It targets the
-Release 1A `.WKS` revision `0x0404`; WK1/WK3/WK4 revisions are not claimed as
-supported by this plugin.
+No official hidden challenge format has been independently confirmed in this repository yet. Add a format section only after testing field offsets, lengths, endianness, checksum rules and recovery behaviour against an authoritative specification or representative samples.

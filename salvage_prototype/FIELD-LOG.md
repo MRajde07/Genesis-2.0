@@ -1,119 +1,164 @@
 # SALVAGE Field Log
 
+Use this dated template for each new investigation. Separate what was tested from what was inferred; never promote an unverified hypothesis to a confirmed format fact without evidence.
+
+## New-entry template
+
+```markdown
+## YYYY-MM-DD — Short experiment title
+
+### Hypothesis
+- What is expected, and why?
+
+### Test
+- Exact fixture/sample, command, test, or observation used.
+- Environment and version details when relevant.
+
+### Result
+- Observed output, pass/fail, measurements, and relevant byte offsets.
+
+### Conclusion
+- Confirmed findings and remaining unverified assumptions.
+- Follow-up work, if any.
+```
+
+---
+
 ## 2026-10-15 — Plugin architecture refactor
 
-### Goal
+### Hypothesis
+The original single-file STUD prototype can be moved into a standard-library-only package without changing its observable valid-file output or its core failure behaviour.
 
-Move the single-file prototype into a standard-library-only package while preserving observable STUD output behaviour.
+### Test
+- Unit tests for registry selection, STUD damage ranges, and missing input directory.
+- Compare canonical STUD behaviour and output fields against the existing prototype.
 
-### Confirmed from the prototype
+### Result
+- Added `FormatPlugin`, `Result`, and `Damage`, a deterministic `PluginRegistry`, CLI/pipeline/output/report modules, and POSIX/Windows launchers.
+- STUD uses a four-byte `STUD` signature, version byte at offset 4, name-length byte at offset 5, and name bytes from offset 6.
+- Historical prototype behaviour used UTF-8 replacement decoding; later structured-damage work deliberately changed invalid UTF-8 handling to preserve raw bytes.
 
-- STUD signature: four bytes `STUD`.
-- Version: one byte at offset 4.
-- Name length: one byte at offset 5.
-- Name bytes begin at offset 6.
-- Valid STUD files return `success`; short headers return `damaged`; truncated names return `partially_recovered`.
-- Unknown signatures return `UNKNOWN` / `unsupported`.
-- The original STUD decoder uses UTF-8 replacement decoding. This was retained for behavioural compatibility in this refactor.
-
-### Architecture added
-
-- `FormatPlugin` base class and `Result` / `Damage` data structures.
-- Deterministic `PluginRegistry` with STUD and generic fallback plugins.
-- CLI, pipeline, output and report modules.
-- POSIX `salvage` and Windows `salvage.cmd` launchers.
-- Tests for registry selection, STUD damage ranges and missing input directory.
-
-### Assumptions / unverified
-
-- Plugin selection uses the highest valid confidence; ties go to the first registered plugin.
-- Generic fallback intentionally returns no extracted content because no structure is supported by evidence.
-- The full hidden hackathon format set is not available yet.
-- Cross-platform Windows execution and Docker image build must be verified in their target environments.
-
+### Conclusion
+The package/plugin architecture and compatibility intent are implemented. Registry ties resolve to the first registered plugin after confidence ranking. The generic fallback does not fabricate decoded fields. The full hidden hackathon format set is unavailable. Windows and Docker behaviour must be verified in their target environments.
 
 ## 2026-10-15 — Structured damage and output shaping
 
-### Implemented
+### Hypothesis
+Centralized output shaping and bounds-checked reads can make corruption diagnosable while keeping output deterministic and preserving recoverable data.
 
-- STUD parsing now uses `ByteReader` for bounds-checked header and name reads. Reader diagnostics are retained as structured damage entries instead of being flattened into error strings.
-- Output shaping is centralized in `src/salvage/output.py`; the pipeline and report module delegate to it.
-- Adopted the status vocabulary `recovered`, `partial`, `damaged`, `unsupported`, and `error`.
-- Per-file output includes `counts.records_recovered`, `counts.records_damaged`, `counts.records_lost`, structured `damage`, and normalized `byte_ranges`. The batch report aggregates statuses and record counts.
-- Invalid UTF-8 names are not decoded with replacement. The name is `null`, exact bytes are returned in `name_raw_hex`, and the damaged byte range is reported.
-- Added output-shaping tests for complete STUD, truncated names, invalid UTF-8 and counts.
+### Test
+- Unit tests for complete STUD data, truncated names, invalid UTF-8, damage ranges, and record counts.
+- Exercise missing input and per-file failure handling.
 
-### Counting assumptions
+### Result
+- STUD parsing uses `ByteReader`; reader diagnostics are represented as structured damage.
+- Output shaping is centralized in `src/salvage/output.py`.
+- Statuses are `recovered`, `partial`, `damaged`, `unsupported`, and `error`.
+- Per-file output carries recovered/damaged/lost counts, `damage`, and normalized `byte_ranges`; the batch report aggregates statuses and counts.
+- Invalid UTF-8 yields `name: null`, preserves exact bytes in `name_raw_hex`, and reports a damage range.
 
-- Counts are mutually exclusive: complete records increment recovered; records with any byte or text-decoding damage increment damaged; a known damaged record that could not be reconstructed at all increments lost.
-- Unsupported files do not increment record-lost counts because the number or structure of their records is unknown.
-- Byte ranges are zero-based and half-open. For missing bytes, the range represents the absent interval; for invalid UTF-8, it identifies the invalid sequence.
-- Windows execution and the Docker build have not been verified in this run.
+### Conclusion
+Counts are mutually exclusive: complete records count as recovered; records with byte/text damage count as damaged; known records that cannot be reconstructed count as lost. Unsupported files do not increment lost-record counts because their record count is unknown. Byte ranges are zero-based and half-open; a missing-byte range describes the absent interval. Windows and Docker were not verified during this experiment.
 
+## 2026-10-15 — Generic binary analysis helpers
 
-## Generic analysis modules
+### Hypothesis
+Bounded, standard-library-only heuristics can provide useful leads for unknown files without claiming speculative structures as facts.
 
-Implemented pure-function analysis helpers for windowed Shannon entropy and histograms; ASCII, UTF-16LE/BE and CP437 strings with offsets; endian-aware integer scans; candidate length fields; fixed-size record hypotheses; CRC16/CRC32, sum8/sum16, XOR and Fletcher checksum guesses; single-byte and repeating-key XOR hypotheses; and count/value RLE detection/decoding. Added `tools/probe.py` and `tools/hexview.py`. The generic fallback includes bounded findings and explicitly labels inferred structures as unverified. Heuristics can produce false positives, especially for CP437 strings, record sizes, checksum coincidences, XOR and RLE.
+### Test
+- Implement pure helpers and expose them through `tools/probe.py` and `tools/hexview.py`.
+- Exercise analysis helpers in unit and pipeline tests.
+
+### Result
+Implemented windowed Shannon entropy and histograms; ASCII, UTF-16LE/BE and CP437 string extraction with offsets; endian-aware integer candidates; length and fixed-record hypotheses; CRC16/CRC32, sum, XOR and Fletcher checksum guesses; single/repeating-key XOR hypotheses; and count/value RLE hypotheses. Generic findings are labelled `unverified` and bounded to the first 64 KiB for primary analysis.
+
+### Conclusion
+The helpers are investigative heuristics, not format decoders. False positives are expected, especially for CP437 strings, candidate record sizes, checksum coincidences, XOR, and RLE. Any proposed interpretation needs independent structural evidence.
 
 ## 2026-10-15 — Declarative field-spec engine
 
-### Implemented
+### Hypothesis
+A shared field-spec engine can reduce duplicate parsing code while retaining bounds diagnostics and raw evidence.
 
-- Added `FieldSpec`, `FieldDecode`, `decode_fields`, and `FormatPlugin.decode_spec` in `formats/base.py`.
-- Added endian-aware signed/unsigned integers, IEEE-754 floats, fixed and length-prefixed strings, fixed bytes/signatures, packed DOS date/time, UTC Unix timestamps, BCD, Julian Day Number conversion, arrays, and index tables with optional offset-based target record decoding.
-- Added declarative validators (`nonzero`, `positive`, `min:N`, `max:N`, `one_of:...`, or callable predicates).
-- Short reads preserve available data and emit structured damage entries with zero-based half-open byte ranges. Partial record data remains available.
-- Re-expressed STUD using `FieldSpec` declarations while preserving valid output shape and strict UTF-8 behavior.
-- Added field-spec tests for types, endianness, truncated strings, dates/timestamps, BCD, arrays/index tables, validators, and STUD compatibility.
+### Test
+- Unit tests for field types, endianness, truncation, dates/timestamps, BCD, arrays/index tables, validators, and STUD compatibility.
 
-### Assumptions / unverified
+### Result
+Added `FieldSpec`, `FieldDecode`, `decode_fields`, and `FormatPlugin.decode_spec`. Supported types include signed/unsigned integers, IEEE-754 floats, fixed bytes/strings, length-prefixed strings, DOS date/time, Unix timestamps, BCD, Julian Day Number, arrays, and index tables. Validators include `nonzero`, `positive`, `min:N`, `max:N`, `one_of:...`, and callable predicates. Short reads retain available values and add structured damage. STUD was re-expressed through field declarations.
 
-- Float fields are IEEE-754 binary32/binary64.
-- DOS datetime bytes are packed date then packed time, using the configured endianness.
-- Unix timestamps are unsigned seconds from the Unix epoch and are displayed in UTC.
-- `julian_date` treats the integer as a Julian Day Number and maps it to an ISO date; challenge formats may use a different epoch or fractional convention.
-- Length-prefixed strings use an integer prefix specified by `prefix_type` (default `u8`).
-- Index tables default to unsigned 32-bit entries; `offset_from` adjusts offsets, and target records are decoded only when `target_fields` are supplied.
-- The field engine is standard-library-only. Platform-specific Windows and Docker verification remains outstanding.
-
+### Conclusion
+The engine is standard-library-only. Its generic conventions are assumptions until confirmed by a target format: floats are IEEE-754; DOS date/time use packed fields; Unix timestamps are unsigned seconds rendered in UTC; Julian dates use an integer Julian Day Number; string prefix type defaults to `u8`; index-table defaults are unsigned 32-bit entries. Format-specific conventions must be checked independently.
 
 ## 2026-10-15 — Field and block integrity checks
 
-### Implemented
+### Hypothesis
+Declarative bounds, enum checks, and optional checksum validation can identify inconsistent fields/blocks without modifying source bytes.
 
-- Added `BlockSpec` to validate absolute block offsets and lengths and optionally verify stored checksums/CRCs.
-- Added standard-library checksum verification for CRC32, CRC16/Modbus, CRC16-CCITT, sum8, sum16, XOR8, and Fletcher16. A checksum field is excluded from the default coverage range; a caller may specify an explicit range.
-- Added inclusive `FieldSpec.minimum` / `maximum`, `enum_values`, and `max_length` checks while retaining existing validator expressions.
-- Failed field, block, and checksum checks generate structured damage with byte ranges and preserve raw bytes as hex where applicable. No values or source bytes are silently corrected.
-- Added tests for valid and failing CRC32, checksum and block bounds, field range/enum failures, raw byte preservation, and out-of-range field offsets.
+### Test
+- Tests for valid/failing CRC32 and other checksums, block bounds, field range/enum failures, raw-byte preservation, and invalid offsets.
 
-### Assumptions / unverified
+### Result
+Added `BlockSpec`; checksum algorithms include CRC32, CRC16/Modbus, CRC16-CCITT, sum8/sum16, XOR8, and Fletcher16. `FieldSpec` supports inclusive minimum/maximum, enum values, and maximum length. Failures produce structured damage and preserve raw bytes.
 
-- `crc16` means reflected CRC-16/Modbus (initial value 0xFFFF); `crc16_ccitt` uses polynomial 0x1021 and initial value 0xFFFF. Legacy formats may use different initial values, reflection, or final XOR.
-- Block offsets and checksum offsets are absolute file offsets. The default checksum coverage is the block excluding the stored checksum bytes.
-- Range endpoints are inclusive for field values; byte ranges are half-open.
-- Checks are diagnostic only. They do not repair data or imply a format is authentic.
+### Conclusion
+`crc16` means reflected CRC-16/Modbus with initial value `0xFFFF`; `crc16_ccitt` uses polynomial `0x1021` and initial value `0xFFFF`. Legacy formats may differ. Block/checksum offsets are absolute; default checksum coverage excludes the stored checksum bytes. Diagnostics do not repair data or establish authenticity.
 
-## Seeded invented formats and golden tests
+## 2026-10-15 — Invented fixture formats and golden tests
 
-Added three deliberately invented fixture formats and corresponding plugins: ASTER (fixed records, big-endian), CRC_BLOCKS (little-endian blocks with CRC32), and XIDX (big-endian offset index, RLE blobs, XOR-obfuscated labels). `tools/gen_samples.py` is seeded and writes a ground-truth JSON next to each binary. Golden tests compare plugin output with the ground truth, check default registry selection, prove ASTER's `nominal_span` field is not used as a length, verify CRC failures are reported without correction, and check repeatability.
+### Hypothesis
+Known synthetic formats with deterministic ground truth can exercise endian handling, record framing, checksums, indexes, and transformations.
 
-## Seeded corruption fuzzing and scoring
+### Test
+Generate fixtures using `tools/gen_samples.py` with a fixed seed; compare decoder output with adjacent `.truth.json` files using golden tests; run generation repeatedly to check determinism.
 
-Implemented `tools/corrupt.py` with deterministic suffix truncation, bit flips, zeroed ranges, and adjacent-byte swaps, plus a JSON manifest of affected ranges. Added end-to-end fuzz tests that run mutated inputs through the real CLI, check zero exit status and valid JSON outputs, and compare unaffected recoverable fields with generated ground truth. Added `tools/score.py` for field-level exact-match accuracy and format-detection precision/recall, with a stable text table and optional JSON summary. Validation uses only the standard library. The tests intentionally do not claim to detect arbitrary bit flips in unchecksummed fields; such corruption is not inferable from a single observed byte sequence without independent redundancy.
+### Result
+Added ASTER (`ARCF`), CRC_BLOCKS (`CRCB`), and XIDX (`XIDX`) synthetic plugins and fixtures. Golden tests check decoded fields, registry selection, ASTER's misleading `nominal_span`, CRC failure reporting without correction, and repeatability.
 
-## Lotus 1-2-3 WKS decoder
+### Conclusion
+These formats are deliberately invented test fixtures, not claims about external file formats. Their layouts are confirmed relative to the local generator and tests only.
 
-- Added `LOTUS_WKS` for the documented Release 1A BOF signature (`0x0404`).
-- Decodes INTEGER, NUMBER, LABEL, and FORMULA cell records; stores row/column
-  indices, raw format bytes, raw value bytes, and formula token bytes.
-- Formula tokens are deliberately not translated or evaluated. The output
-  contains the token stream in hex, `formula_text: null`, and an explicit
-  unverified flag rather than a guessed formula expression.
-- Unknown records are retained with their opcode, length, and body hex and are
-  flagged as unverified. Damaged/truncated records carry byte ranges.
-- Added synthetic unit tests and an integration test that scans `samples/`
-  for real `.wks` files. The integration test skips with a clear message when
-  no real samples are present.
-- Scope limitation: this is a conservative subset decoder, not a full Lotus
-  1-2-3 formula engine or complete formatting/control-record implementation.
+## 2026-10-15 — Corruption fuzzing and scoring
+
+### Hypothesis
+Seeded mutations and a scoring utility can test crash resistance and quantify field recovery without claiming undetectable corruption is detectable.
+
+### Test
+Use `tools/corrupt.py` to generate suffix truncations, bit flips, zeroed ranges, and adjacent-byte swaps. Run the real CLI against mutations and compare unaffected recoverable fields to fixture ground truth. Use `tools/score.py` for exact field accuracy and format precision/recall.
+
+### Result
+The mutation manifest records source, mutation kind, affected range, seed, and lengths. Fuzz tests check zero exit status, parseable JSON, report creation, and unaffected fields. Scoring supports stable text and optional JSON output.
+
+### Conclusion
+A changed value in an unchecksummed field may remain structurally valid and cannot always be detected from the observed bytes alone. Tests deliberately avoid asserting otherwise.
+
+## 2026-10-15 — Lotus 1-2-3 Release 1A WKS decoder
+
+### Hypothesis
+A conservative record-stream parser can recover a useful subset of Release 1A `.WKS` cells while preserving unknown bytes and avoiding guessed formula expressions.
+
+### Test
+- Synthetic unit fixtures for the BOF signature, supported cell records, unknown records, and truncation.
+- Optional integration test searches `samples/` for real `.wks` files.
+- End-to-end CLI test with a synthetic WKS stream.
+
+### Result
+Added `LOTUS_WKS` for BOF revision `0x0404`; parses INTEGER, NUMBER, LABEL, FORMULA, RANGE metadata, EOF, and unknown record envelopes. Formula tokens and unknown bodies are preserved as hex. Truncated records and missing EOF generate damage ranges. The optional real-sample test skips when no `.wks` sample exists.
+
+### Conclusion
+Synthetic behaviour is tested; real-file interoperability is unverified until representative real `.WKS` samples are available. Formula tokens are not evaluated or translated, display semantics are not inferred from the format byte, and complete formatting/control-record coverage is not claimed.
+
+## 2026-10-15 — Packaging and offline build configuration
+
+### Hypothesis
+The CLI can be packaged in a configurable Python container and tested through Make without downloading Python packages or contacting the network during build/run.
+
+### Test
+- `make test` runs the standard-library unittest suite.
+- `make build` invokes Docker with `--network=none` and `--pull=false`.
+- Validate Dockerfile and Makefile syntax/configuration by inspection; Docker runtime verification is pending unless run on a host with Docker and the base image cached.
+
+### Result
+The Dockerfile uses `ARG PYTHON_VERSION` (default `3.12`), copies the repository, installs no dependencies, and uses `./salvage` as entrypoint. Make targets include `build`, `test`, `run`, and `clean`.
+
+### Conclusion
+The build is offline only when the selected `python:<version>-slim` base image is already cached locally. No claim is made that Docker can create a missing base image without network access. Actual image build/run remains environment-dependent.

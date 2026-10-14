@@ -1,0 +1,16 @@
+.git
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+output
+output_dir
+salvage-output
+samples/mutated
+samples/generated
