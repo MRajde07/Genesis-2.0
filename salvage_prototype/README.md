@@ -96,3 +96,21 @@ FIELD-LOG.md            Evidence and development log
 - A generic fallback cannot make arbitrary unknown or encrypted data semantically understandable.
 - The CLI attempts to handle errors without crashing, but operating-system failures can prevent output files from being written at all.
 - STUD's historical invalid-UTF-8 replacement behaviour is intentionally preserved for compatibility; future formats should preserve undecodable bytes instead of replacing them.
+
+### Corruption fuzzing and scoring
+
+Generate reproducible truncation, bit-flip, zero-block and adjacent-byte-swap mutations:
+
+```bash
+python tools/corrupt.py samples/generated samples/mutated --seed 1337 --per-type 1
+```
+
+The output includes mutated binary files and `manifest.json` with each mutation's byte range. Run the full CLI against one or more mutated inputs, then score per-file JSON against the ground-truth fixtures:
+
+```bash
+python salvage samples/mutated output/mutated
+python tools/score.py samples/generated output/mutated --json output/mutation-score.json
+python -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+The score table reports field-level exact-match accuracy and format-detection precision/recall. The fuzz suite runs each generated mutation through the CLI in isolation, checks exit code zero and valid JSON, and compares every non-null recovered field whose source bytes were not mutated against ground truth. Values in mutated regions cannot always be distinguished from legitimate values in formats without checksums or redundancy; the test therefore does not pretend such corruption is detectable when the format provides no evidence.

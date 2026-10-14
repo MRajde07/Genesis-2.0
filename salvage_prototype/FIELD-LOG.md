@@ -97,3 +97,7 @@ Implemented pure-function analysis helpers for windowed Shannon entropy and hist
 ## Seeded invented formats and golden tests
 
 Added three deliberately invented fixture formats and corresponding plugins: ASTER (fixed records, big-endian), CRC_BLOCKS (little-endian blocks with CRC32), and XIDX (big-endian offset index, RLE blobs, XOR-obfuscated labels). `tools/gen_samples.py` is seeded and writes a ground-truth JSON next to each binary. Golden tests compare plugin output with the ground truth, check default registry selection, prove ASTER's `nominal_span` field is not used as a length, verify CRC failures are reported without correction, and check repeatability.
+
+## Seeded corruption fuzzing and scoring
+
+Implemented `tools/corrupt.py` with deterministic suffix truncation, bit flips, zeroed ranges, and adjacent-byte swaps, plus a JSON manifest of affected ranges. Added end-to-end fuzz tests that run mutated inputs through the real CLI, check zero exit status and valid JSON outputs, and compare unaffected recoverable fields with generated ground truth. Added `tools/score.py` for field-level exact-match accuracy and format-detection precision/recall, with a stable text table and optional JSON summary. Validation uses only the standard library. The tests intentionally do not claim to detect arbitrary bit flips in unchecksummed fields; such corruption is not inferable from a single observed byte sequence without independent redundancy.

@@ -84,3 +84,11 @@ python tools/gen_samples.py --output-dir samples/generated --seed 1337
 ```
 
 Each `.bin.truth.json` is the fixture's expected decoded data and is used by `tests/golden/test_real_format_golden.py` to check decoder results exactly.
+
+## Corruption and scoring utilities
+
+`tools/corrupt.py INPUT_DIR OUTPUT_DIR --seed N --per-type K` generates deterministic mutated copies using four operations: suffix truncation at a seeded random offset, a single-bit flip, zeroing a contiguous block, and swapping adjacent bytes. It writes `manifest.json` containing the source file, output filename, mutation kind, byte range, seed and original/mutated lengths. The ground-truth sidecars are not copied into the mutation corpus.
+
+`tools/score.py TRUTH_DIR RESULTS_DIR` compares per-file output JSON against `*.truth.json` fixtures and prints a table with exact field matches and format decisions. `--json PATH` additionally writes a machine-readable summary. Field accuracy counts exact leaf-value matches over expected leaves; format detection precision and recall use exact format-name matches across the fixture set.
+
+The fuzz tests execute the actual CLI subprocess for every seeded mutation and require exit code zero, parseable per-file JSON and `report.json`, and ground-truth equality for non-null fields whose source bytes and framing dependencies were not mutated. This distinction is intentional: in a format without checksums, parity, or redundant data, a bit-flipped value may remain structurally valid and cannot be identified as corrupt from the bytes alone.
