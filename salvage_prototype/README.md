@@ -114,3 +114,13 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 The score table reports field-level exact-match accuracy and format-detection precision/recall. The fuzz suite runs each generated mutation through the CLI in isolation, checks exit code zero and valid JSON, and compares every non-null recovered field whose source bytes were not mutated against ground truth. Values in mutated regions cannot always be distinguished from legitimate values in formats without checksums or redundancy; the test therefore does not pretend such corruption is detectable when the format provides no evidence.
+
+### Lotus 1-2-3 Release 1A WKS
+
+SALVAGE includes a conservative `LOTUS_WKS` plugin for Lotus 1-2-3 Release 1A
+`.WKS` files (BOF revision `0x0404`). It extracts INTEGER, NUMBER, LABEL, and
+FORMULA cells, preserves unknown record bodies, and reports malformed/truncated
+records with byte ranges. Formula token streams are retained as raw hex and are
+not evaluated or translated. Add real `.WKS` fixtures under `samples/` to enable
+the optional real-sample integration test; it skips cleanly when none are present.
+See `FORMAT-SPEC.md` for supported records and known limitations.

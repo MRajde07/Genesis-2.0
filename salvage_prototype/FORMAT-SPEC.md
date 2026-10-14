@@ -92,3 +92,31 @@ Each `.bin.truth.json` is the fixture's expected decoded data and is used by `te
 `tools/score.py TRUTH_DIR RESULTS_DIR` compares per-file output JSON against `*.truth.json` fixtures and prints a table with exact field matches and format decisions. `--json PATH` additionally writes a machine-readable summary. Field accuracy counts exact leaf-value matches over expected leaves; format detection precision and recall use exact format-name matches across the fixture set.
 
 The fuzz tests execute the actual CLI subprocess for every seeded mutation and require exit code zero, parseable per-file JSON and `report.json`, and ground-truth equality for non-null fields whose source bytes and framing dependencies were not mutated. This distinction is intentional: in a format without checksums, parity, or redundant data, a bit-flipped value may remain structurally valid and cannot be identified as corrupt from the bytes alone.
+
+## Lotus 1-2-3 Release 1A `.WKS` support
+
+`LOTUS_WKS` recognizes the Release 1A stream whose first record is BOF opcode
+`0x0000`, body length `2`, and little-endian revision `0x0404`. Records use a
+little-endian 16-bit opcode, 16-bit body length, then the body. The reader is
+stdlib-only and focuses on cell records: INTEGER (`0x000D`), NUMBER (`0x000E`),
+LABEL (`0x000F`), and FORMULA (`0x0010`). It also preserves RANGE metadata and
+unknown records.
+
+- INTEGER values are decoded as signed 16-bit little-endian integers.
+- NUMBER values are decoded as little-endian IEEE-754 binary64 values.
+- LABEL values preserve the prefix byte and raw bytes; text is decoded as
+  CP437, which maps all byte values. The alignment meaning of known prefixes
+  is reported, while unknown prefixes are flagged.
+- FORMULA cells preserve the cached numeric value and the token stream as hex.
+  Formula tokens are not evaluated or translated; `formula_text` is null and
+  `formula_evaluated` is false to avoid inventing an expression.
+- The cell format byte is retained raw. Display formatting/date semantics are
+  not inferred.
+- Unknown record bodies are preserved as hex and marked unverified.
+- Truncated records, missing EOF, unexpected trailing bytes, malformed cells,
+  and unsupported interpretations produce damage entries with byte ranges.
+
+This decoder intentionally does not claim full fidelity for formatting, names,
+macros, formula token translation, or every control record. It targets the
+Release 1A `.WKS` revision `0x0404`; WK1/WK3/WK4 revisions are not claimed as
+supported by this plugin.

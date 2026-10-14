@@ -101,3 +101,19 @@ Added three deliberately invented fixture formats and corresponding plugins: AST
 ## Seeded corruption fuzzing and scoring
 
 Implemented `tools/corrupt.py` with deterministic suffix truncation, bit flips, zeroed ranges, and adjacent-byte swaps, plus a JSON manifest of affected ranges. Added end-to-end fuzz tests that run mutated inputs through the real CLI, check zero exit status and valid JSON outputs, and compare unaffected recoverable fields with generated ground truth. Added `tools/score.py` for field-level exact-match accuracy and format-detection precision/recall, with a stable text table and optional JSON summary. Validation uses only the standard library. The tests intentionally do not claim to detect arbitrary bit flips in unchecksummed fields; such corruption is not inferable from a single observed byte sequence without independent redundancy.
+
+## Lotus 1-2-3 WKS decoder
+
+- Added `LOTUS_WKS` for the documented Release 1A BOF signature (`0x0404`).
+- Decodes INTEGER, NUMBER, LABEL, and FORMULA cell records; stores row/column
+  indices, raw format bytes, raw value bytes, and formula token bytes.
+- Formula tokens are deliberately not translated or evaluated. The output
+  contains the token stream in hex, `formula_text: null`, and an explicit
+  unverified flag rather than a guessed formula expression.
+- Unknown records are retained with their opcode, length, and body hex and are
+  flagged as unverified. Damaged/truncated records carry byte ranges.
+- Added synthetic unit tests and an integration test that scans `samples/`
+  for real `.wks` files. The integration test skips with a clear message when
+  no real samples are present.
+- Scope limitation: this is a conservative subset decoder, not a full Lotus
+  1-2-3 formula engine or complete formatting/control-record implementation.
