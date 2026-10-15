@@ -1,0 +1,43 @@
+{
+  "expected": {
+    "block_count": 3,
+    "blocks": [
+      {
+        "complete": true,
+        "crc32_valid": true,
+        "index": 0,
+        "label": "amber",
+        "length": 12,
+        "payload_raw_hex": "0b00fd08000005616d626572",
+        "reading": 2301,
+        "sequence": 11,
+        "stored_crc32": 2217523068
+      },
+      {
+        "complete": true,
+        "crc32_valid": true,
+        "index": 1,
+        "label": "violet",
+        "length": 13,
+        "payload_raw_hex": "0c00b3ffffff0676696f6c6574",
+        "reading": -77,
+        "sequence": 12,
+        "stored_crc32": 2584152910
+      },
+      {
+        "complete": true,
+        "crc32_valid": true,
+        "index": 2,
+        "label": "copper",
+        "length": 13,
+        "payload_raw_hex": "0d00f206000006636f70706572",
+        "reading": 1778,
+        "sequence": 13,
+        "stored_crc32": 4218709882
+      }
+    ],
+    "version": 1
+  },
+  "format": "CRC_BLOCKS",
+  "seed": 1337
+}

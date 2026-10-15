@@ -1,0 +1,85 @@
+{
+  "expected": {
+    "blob_count": 3,
+    "entries": [
+      {
+        "blob_bytes": [
+          65,
+          65,
+          65,
+          65,
+          16,
+          17,
+          126,
+          126,
+          126
+        ],
+        "blob_hex": "4141414110117e7e7e",
+        "blob_offset": 38,
+        "complete": true,
+        "decoded_length": 9,
+        "index": 0,
+        "label": "north-cache",
+        "label_length": 11,
+        "label_offset": 60,
+        "packed_hex": "044101100111037e",
+        "packed_length": 8,
+        "rle_valid": true,
+        "xor_key": 90
+      },
+      {
+        "blob_bytes": [
+          12,
+          12,
+          12,
+          12,
+          12,
+          1,
+          2,
+          3,
+          255,
+          255
+        ],
+        "blob_hex": "0c0c0c0c0c010203ffff",
+        "blob_offset": 46,
+        "complete": true,
+        "decoded_length": 10,
+        "index": 1,
+        "label": "legacy-note",
+        "label_length": 11,
+        "label_offset": 71,
+        "packed_hex": "050c01010102010302ff",
+        "packed_length": 10,
+        "rle_valid": true,
+        "xor_key": 195
+      },
+      {
+        "blob_bytes": [
+          0,
+          0,
+          0,
+          38,
+          38,
+          38,
+          38
+        ],
+        "blob_hex": "00000026262626",
+        "blob_offset": 56,
+        "complete": true,
+        "decoded_length": 7,
+        "index": 2,
+        "label": "sector-3",
+        "label_length": 8,
+        "label_offset": 82,
+        "packed_hex": "03000426",
+        "packed_length": 4,
+        "rle_valid": true,
+        "xor_key": 39
+      }
+    ],
+    "index_offset": 8,
+    "version": 1
+  },
+  "format": "XIDX",
+  "seed": 1337
+}
