@@ -10,7 +10,6 @@
     "records",
     "counts",
     "damage",
-    "byte_ranges",
     "errors"
   ],
   "properties": {
@@ -115,32 +114,16 @@
         "additionalProperties": false
       }
     },
-    "byte_ranges": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": [
-          "start",
-          "end"
-        ],
-        "properties": {
-          "start": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "end": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "additionalProperties": false
-      }
-    },
     "errors": {
       "type": "array",
       "items": {
         "type": "string"
       }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
     }
   },
   "additionalProperties": true

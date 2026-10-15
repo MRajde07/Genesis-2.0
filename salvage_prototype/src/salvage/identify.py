@@ -91,9 +91,19 @@ def _collect_evidence(plugin: FormatPlugin, data: bytes) -> tuple[float, list[di
                               _WEIGHTS["detect"], contradiction=True))
         contradiction_count += 1
 
-    for item in _signature_clues(plugin, data):
+    signature_clues = _signature_clues(plugin, data)
+    for item in signature_clues:
         evidence.append(item)
         score_total += item["score"] * item["weight"]
+
+    # Structural clues (header size, field plausibility, checksum) only count for
+    # a candidate that is anchored by detect() or a matching signature. Otherwise
+    # any file whose bytes happen to look plausible would score for every format,
+    # and the evidence would show values read from unrelated bytes.
+    anchored = (evidence and evidence[0]["clue"] == "detect" and evidence[0]["score"] > 0.0) or any(
+        item["matched"] and item["clue"].startswith("signature") for item in signature_clues)
+    if not anchored:
+        return 0.0, evidence
 
     header_length = getattr(plugin, "header_length", None)
     if isinstance(header_length, int) and header_length >= 0:

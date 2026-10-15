@@ -88,9 +88,14 @@ class AnalysisTests(unittest.TestCase):
         result = GenericPlugin().decode(b"unknown string\x00\x04\x00\x00")
         self.assertEqual(result.status, "unsupported")
         self.assertTrue(result.data["unverified"])
-        self.assertIn("strings", result.data)
-        self.assertIn("entropy", result.data)
-        self.assertIn("fixed_record_candidates", result.data)
+        # Default summary is short; the full toolkit output sits under a debug-only key.
+        self.assertIn("ascii_strings", result.data)
+        self.assertIn("entropy_bits_per_byte", result.data)
+        self.assertNotIn("fixed_record_candidates", result.data)
+        full = result.data["_full_analysis"]
+        self.assertIn("strings", full)
+        self.assertIn("entropy", full)
+        self.assertIn("fixed_record_candidates", full)
         json.dumps(result.data)
 
     def test_probe_and_hexview(self):

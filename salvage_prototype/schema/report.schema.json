@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "SALVAGE batch report placeholder",
+  "title": "SALVAGE batch report",
   "type": "object",
   "required": [
     "tool",
@@ -10,7 +10,6 @@
     "records_damaged",
     "records_lost",
     "failures",
-    "results",
     "files"
   ],
   "properties": {
@@ -20,12 +19,6 @@
     "files_processed": {
       "type": "integer",
       "minimum": 0
-    },
-    "status_vocabulary": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
     },
     "status_counts": {
       "type": "object",
@@ -46,19 +39,7 @@
       "type": "integer",
       "minimum": 0
     },
-    "output_errors": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
     "failures": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    },
-    "results": {
       "type": "array",
       "items": {
         "type": "object"

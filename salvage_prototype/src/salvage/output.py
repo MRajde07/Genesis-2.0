@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from functools import lru_cache
 from collections import Counter
 from pathlib import Path
@@ -152,44 +153,91 @@ def _status(status: Any) -> str:
     return normalized if normalized in STATUS_VOCABULARY else "error"
 
 
+_REGION_ONLY = re.compile(r"\[(\d+)\]")
+
+
+def _damaged_record_keys(damage: list[dict[str, Any]]) -> set[int]:
+    """Record indexes named by damage fields such as ``blocks[2].crc32``."""
+    keys: set[int] = set()
+    for item in damage:
+        match = _REGION_ONLY.search(str(item.get("field", "")))
+        if match:
+            keys.add(int(match.group(1)))
+    return keys
+
+
+def _record_counts(records: list[Any], damage: list[dict[str, Any]], status: str) -> dict[str, int]:
+    """Count recovered/damaged/lost per record, not per file.
+
+    A record is damaged when the plugin flagged it incomplete, or a damage entry
+    names its index. Damage that names no record (header, trailing bytes) does
+    not taint other records; with a single record it is attributed to that
+    record. A file being ``partial`` never makes intact records damaged.
+    """
+    if not records:
+        lost = 1 if status in ("partial", "damaged") else 0
+        return {"records_recovered": 0, "records_damaged": 0, "records_lost": lost}
+    named = _damaged_record_keys(damage)
+    damaged = 0
+    for position, record in enumerate(records):
+        key = position
+        flagged = False
+        if isinstance(record, dict):
+            raw_key = record.get("index", record.get("record_index", position))
+            key = raw_key if isinstance(raw_key, int) else position
+            flagged = record.get("complete") is False
+        if flagged or key in named or (len(records) == 1 and damage):
+            damaged += 1
+    return {"records_recovered": len(records) - damaged, "records_damaged": damaged,
+            "records_lost": 0}
+
+
+def _selected_confidence(identification: list[dict[str, Any]] | None) -> float:
+    for candidate in identification or []:
+        if candidate.get("selected"):
+            try:
+                return round(float(candidate.get("confidence", 0.0)), 4)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
 def shape_result(file_name: str, decoded: Any, *, fallback_format: str = "UNKNOWN",
-                 identification: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Convert an internal plugin Result to the stable per-file JSON schema."""
-    raw_damage = list(getattr(decoded, "damage", []) or [])
-    damage = [_damage_dict(item) for item in raw_damage]
+                 identification: list[dict[str, Any]] | None = None,
+                 debug: bool = False) -> dict[str, Any]:
+    """Convert a plugin Result to the slim per-file JSON schema.
+
+    The default output carries only what was recovered, what was lost, and the
+    selected format with its confidence. Rejected candidates and full analysis
+    detail appear only when ``debug`` is true.
+    """
+    damage = [_damage_dict(item) for item in list(getattr(decoded, "damage", []) or [])]
     records = list(getattr(decoded, "records", []) or [])
     data = getattr(decoded, "data", None)
     status = _status(getattr(decoded, "status", "unsupported"))
     if damage and status == "recovered":
         status = "damaged"
-    # Counts are mutually exclusive: complete records are recovered, records
-    # with byte/decoding damage are damaged, and a known record that could not
-    # be reconstructed at all is lost. Unknown files are not guessed to contain
-    # a particular number of records.
-    if damage or status in ("partial", "damaged"):
-        records_recovered = 0
-        records_damaged = len(records) if records else 0
-        records_lost = 1 if not records and status in ("partial", "damaged") else 0
-    else:
-        records_recovered = len(records)
-        records_damaged = 0
-        records_lost = 0
+    if isinstance(data, dict):
+        # Keys starting with "_" are debug-only detail from a plugin.
+        extra = {key: value for key, value in data.items() if str(key).startswith("_")}
+        data = {key: value for key, value in data.items() if not str(key).startswith("_")}
+        # A data key that just repeats the top-level records list adds nothing.
+        data = {key: value for key, value in data.items()
+                if not (records and isinstance(value, list) and value == records)}
+        if debug and extra:
+            data["debug"] = {str(key).lstrip("_"): value for key, value in extra.items()}
     result = {
         "file_name": str(file_name),
         "format": str(getattr(decoded, "format", "") or fallback_format),
+        "confidence": _selected_confidence(identification),
         "status": status,
         "data": data,
         "records": records,
-        "counts": {
-            "records_recovered": records_recovered,
-            "records_damaged": records_damaged,
-            "records_lost": records_lost,
-        },
+        "counts": _record_counts(records, damage, status),
         "damage": damage,
-        "byte_ranges": [item["byte_range"] for item in damage],
         "errors": [str(item) for item in (getattr(decoded, "errors", []) or [])],
     }
-    if identification is not None:
+    if debug and identification is not None:
         # Candidate dictionaries may carry a live plugin reference for internal
         # dispatch. Never leak that object into JSON output.
         result["identification"] = [
@@ -203,10 +251,10 @@ def shape_failure(file_name: str, format_name: str, message: str, *, field: str 
     damage = _damage_dict({"field": field, "offset": 0, "expected": 0, "found": 0,
                            "reason": message, "byte_range": {"start": 0, "end": 0}})
     return {
-        "file_name": str(file_name), "format": str(format_name), "status": "error",
-        "data": None, "records": [],
+        "file_name": str(file_name), "format": str(format_name), "confidence": 0.0,
+        "status": "error", "data": None, "records": [],
         "counts": {"records_recovered": 0, "records_damaged": 0, "records_lost": 0},
-        "damage": [damage], "byte_ranges": [damage["byte_range"]], "errors": [str(message)],
+        "damage": [damage], "errors": [str(message)],
     }
 
 
@@ -216,30 +264,31 @@ def shape_failure_entry(path: str, stage: str, error: BaseException | str) -> di
 
 
 def shape_report(results: list[dict[str, Any]], failures: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Batch summary: one short entry per file, no repeated per-file results."""
     failures = sorted(list(failures or []), key=lambda f: (str(f.get("path", "")), str(f.get("stage", "")), str(f.get("error", ""))))
     results = sorted(results, key=lambda r: str(r.get("file_name", "")))
     counts = Counter(item.get("status", "error") for item in results)
+    empty = {"records_recovered": 0, "records_damaged": 0, "records_lost": 0}
+
+    def total(key: str) -> int:
+        return sum(item.get("counts", {}).get(key, 0) for item in results)
+
     return {
         "tool": "SALVAGE",
         "files_processed": len(results),
-        "status_vocabulary": list(STATUS_VOCABULARY),
         "status_counts": {key: counts.get(key, 0) for key in STATUS_VOCABULARY},
-        "records_recovered": sum(item.get("counts", {}).get("records_recovered", 0) for item in results),
-        "records_damaged": sum(item.get("counts", {}).get("records_damaged", 0) for item in results),
-        "records_lost": sum(item.get("counts", {}).get("records_lost", 0) for item in results),
-        "output_errors": [],
+        "records_recovered": total("records_recovered"),
+        "records_damaged": total("records_damaged"),
+        "records_lost": total("records_lost"),
         "failures": failures,
-        "results": results,
         "files": [
             {
                 "file_name": item.get("file_name", ""),
                 "format": item.get("format", "UNKNOWN"),
-                "confidence": next((candidate.get("confidence", 0.0)
-                                    for candidate in item.get("identification", [])
-                                    if candidate.get("selected")), 0.0),
+                "confidence": item.get("confidence", _selected_confidence(item.get("identification"))),
                 "status": item.get("status", "error"),
-                "counts": item.get("counts", {"records_recovered": 0, "records_damaged": 0, "records_lost": 0}),
-                "byte_ranges": item.get("byte_ranges", []),
+                "counts": item.get("counts", dict(empty)),
+                "byte_ranges": [d["byte_range"] for d in item.get("damage", []) if "byte_range" in d],
                 "warnings": [str(d.get("reason", "")) for d in item.get("damage", [])]
                             + [str(e) for e in item.get("errors", [])],
             }

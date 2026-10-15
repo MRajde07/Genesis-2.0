@@ -136,3 +136,11 @@ Makefile                build, test, run, clean targets
 FORMAT-SPEC.md          Per-format field layouts and evidence status
 FIELD-LOG.md            Dated hypothesis/test/result/conclusion log
 ```
+
+## Output size and `--debug`
+
+By default each input gets one short JSON (format, confidence, status, recovered data, per-record counts, structured damage) and `report.json` carries one summary line per file. Rejected-format evidence and the full analysis toolkit output are left out. Add `--debug` to include them:
+
+```
+./salvage <input_dir> <output_dir> --debug
+```

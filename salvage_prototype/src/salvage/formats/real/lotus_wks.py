@@ -169,7 +169,7 @@ class LotusWKSPlugin(FormatPlugin):
             "version_hex": f"0x{version:04x}",
             "cells": cells,
             "unrecognized_records": unrecognized,
-            "records": record_summaries,
+            "_record_log": record_summaries,
             "eof_seen": eof_seen,
             "formula_policy": "formula token streams are preserved as raw hex; no formula evaluation or token translation attempted",
             "verified": not result.damage and not unrecognized,

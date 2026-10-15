@@ -18,6 +18,9 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
     parser = argparse.ArgumentParser(description="SALVAGE - Offline binary recovery toolkit")
     parser.add_argument("input_dir", help="Folder containing input files")
     parser.add_argument("output_dir", help="Folder for JSON output")
+    parser.add_argument("--debug", action="store_true",
+                        help="Include rejected-format evidence and full analysis detail in the JSON")
+    debug = False
     results: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
     output_dir: Path | None = None
@@ -25,6 +28,7 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
         try:
             args = parser.parse_args(argv)
             input_dir, output_dir = Path(args.input_dir), Path(args.output_dir)
+            debug = bool(args.debug)
         except BaseException as error:
             # argparse normally raises SystemExit for malformed CLI arguments.
             print(f"SALVAGE: invalid invocation: {type(error).__name__}: {error}")
@@ -58,7 +62,7 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
                     failures.append(_failure(entry, "inspect_entry", "entry is not a regular file (subdirectories are not traversed)"))
                     continue
                 try:
-                    result = inspect_file(entry, registry)
+                    result = inspect_file(entry, registry, debug=debug)
                     if not isinstance(result, dict):
                         raise TypeError("file processor did not return a result object")
                 except Exception as error:

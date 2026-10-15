@@ -106,7 +106,9 @@ class IdentifyTests(unittest.TestCase):
 
 
     def test_pipeline_exposes_serializable_candidate_evidence(self):
-        result = inspect_bytes("sample.bin", b"STUD\x01\x03Ana")
+        # Rejected-candidate evidence is debug-only.
+        self.assertNotIn("identification", inspect_bytes("sample.bin", b"STUD\x01\x03Ana"))
+        result = inspect_bytes("sample.bin", b"STUD\x01\x03Ana", debug=True)
         self.assertIn("identification", result)
         self.assertEqual(result["identification"][0]["name"], "STUD")
         self.assertTrue(result["identification"][0]["selected"])

@@ -70,7 +70,8 @@ class SalvageTests(unittest.TestCase):
             self.assertEqual(process.returncode, 0, process.stderr)
             report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
             self.assertEqual(report["files_processed"], 2)
-            self.assertEqual(len(report["results"]), 2)
+            self.assertEqual(len(report["files"]), 2)
+            self.assertNotIn("results", report)
 
     def test_missing_input_is_zero_exit(self):
         with tempfile.TemporaryDirectory() as temp:
