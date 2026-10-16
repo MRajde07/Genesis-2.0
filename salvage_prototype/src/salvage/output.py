@@ -1,7 +1,9 @@
 """The single boundary for shaping SALVAGE output and report JSON.
 
-Keep schema-specific JSON decisions here so an official schema can replace
-this module's shaping without changing parsers or orchestration.
+Shapes plugin results into the OUTPUT-CONTRACT:
+  per-file: source_file, format, status, metadata, records, damage
+  report:   tool_version, files[{file,format,status,records,damage}], totals
+Extra keys (confidence, counts, errors, ...) are kept; the schemas allow them.
 """
 from __future__ import annotations
 
@@ -13,7 +15,21 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-STATUS_VOCABULARY = ("recovered", "partial", "damaged", "unsupported", "error")
+TOOL_VERSION = "0.1.0"
+STATUS_VOCABULARY = ("ok", "partial", "unsupported", "unrecognized", "failed")
+FORMAT_VOCABULARY = (
+    "LIBRA-98", "LABLOG", "VAULT", "WKS", "WPD",
+    "BRAVO", "CVT", "EBCDIC-DUMP", "WAD", "PAK", "UNKNOWN",
+)
+
+
+def normalize_format(value: Any) -> str:
+    """Return a format name allowed by the organiser's output contract."""
+    fmt = str(value or "UNKNOWN").strip().upper()
+    return fmt if fmt in FORMAT_VOCABULARY else "UNKNOWN"
+DAMAGE_KINDS = ("truncated", "crc_mismatch", "checksum_mismatch", "bad_length",
+                "unparsed_bytes", "count_mismatch", "invalid_value", "oob_pointer",
+                "index_missing", "header_checksum", "encrypted", "unknown_record")
 
 
 SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schema"
@@ -102,6 +118,47 @@ def write_json(path: Path, value: Any, *, schema_name: str | None = None) -> Non
     path.write_text(serialized, encoding="utf-8", newline="\n")
 
 
+def _clean(value: Any) -> Any:
+    """Make any plugin value JSON-safe: str keys, finite floats, no bytes/tuples."""
+    if isinstance(value, dict):
+        return {str(k): _clean(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_clean(v) for v in value]
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).hex()
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+_KIND_HINTS = (("encrypt", "encrypted"), ("crc", "crc_mismatch"),
+               ("checksum", "checksum_mismatch"), ("truncat", "truncated"),
+               ("count", "count_mismatch"), ("bounds", "oob_pointer"),
+               ("pointer", "oob_pointer"), ("out of range", "oob_pointer"),
+               ("index", "index_missing"), ("length", "bad_length"),
+               ("trailing", "unparsed_bytes"), ("unparsed", "unparsed_bytes"),
+               ("unknown record", "unknown_record"))
+
+
+def _damage_kind(raw: dict[str, Any], reason: str) -> str:
+    """Use the plugin's own ``kind`` when valid. Otherwise guess from text.
+
+    The guess is a stopgap: plugins should set ``kind`` explicitly.
+    """
+    kind = raw.get("kind")
+    if kind in DAMAGE_KINDS:
+        return kind
+    text = f"{raw.get('field', '')} {reason}".lower()
+    if "header" in text and ("crc" in text or "checksum" in text):
+        return "header_checksum"
+    for needle, mapped in _KIND_HINTS:
+        if needle in text:
+            return mapped
+    return "invalid_value"
+
+
 def _damage_dict(item: Any) -> dict[str, Any]:
     if hasattr(item, "to_dict"):
         raw = item.to_dict()
@@ -110,15 +167,16 @@ def _damage_dict(item: Any) -> dict[str, Any]:
     else:
         raw = {"field": "unknown", "offset": 0, "expected": 0, "found": 0,
                "reason": f"invalid damage entry type: {type(item).__name__}"}
-    # Normalize the reader's structured contract and derive a missing-byte
-    # range when a plugin has not supplied a more precise affected-byte range.
     field = str(raw.get("field", "unknown"))
     offset = _nonnegative_int(raw.get("offset"), 0)
     expected = _nonnegative_int(raw.get("expected"), 0)
     found = _nonnegative_int(raw.get("found"), 0)
-    reason = str(raw.get("reason", "unspecified damage"))
-    shaped = {"field": field, "offset": offset, "expected": expected,
-              "found": found, "reason": reason}
+    reason = str(raw.get("reason", raw.get("detail", "unspecified damage")))
+    lossy = raw.get("lossy") if isinstance(raw.get("lossy"), bool) else True
+    shaped = {"kind": _damage_kind(raw, reason), "offset": offset, "detail": reason,
+              "lossy": lossy,
+              # extras kept from the earlier design
+              "field": field, "expected": expected, "found": found, "reason": reason}
     byte_range = raw.get("byte_range")
     if isinstance(byte_range, dict) and "start" in byte_range and "end" in byte_range:
         start = _nonnegative_int(byte_range.get("start"), offset)
@@ -146,11 +204,27 @@ def _nonnegative_int(value: Any, default: int) -> int:
         return default
 
 
-def _status(status: Any) -> str:
-    aliases = {"success": "recovered", "partially_recovered": "partial",
-               "partially-recovered": "partial"}
-    normalized = aliases.get(str(status), str(status))
-    return normalized if normalized in STATUS_VOCABULARY else "error"
+def _status(raw_status: Any, fmt: str, has_records: bool, has_damage: bool) -> str:
+    """Map a plugin status onto the contract's five values.
+
+    recovered -> ok (partial if any damage); damaged -> partial if something was
+    recovered else failed; error -> failed; an unidentified file -> unrecognized.
+    """
+    raw = {"success": "recovered", "partially_recovered": "partial",
+           "partially-recovered": "partial"}.get(str(raw_status), str(raw_status))
+    if raw in ("recovered", "ok"):
+        status = "partial" if has_damage else "ok"
+    elif raw == "partial":
+        status = "partial"
+    elif raw == "damaged":
+        status = "partial" if has_records else "failed"
+    elif raw in ("unsupported", "unrecognized", "failed"):
+        status = raw
+    else:  # "error" and anything unexpected
+        status = "failed"
+    if fmt == "UNKNOWN" and status != "failed":
+        status = "unrecognized"
+    return status
 
 
 _REGION_ONLY = re.compile(r"\[(\d+)\]")
@@ -167,15 +241,9 @@ def _damaged_record_keys(damage: list[dict[str, Any]]) -> set[int]:
 
 
 def _record_counts(records: list[Any], damage: list[dict[str, Any]], status: str) -> dict[str, int]:
-    """Count recovered/damaged/lost per record, not per file.
-
-    A record is damaged when the plugin flagged it incomplete, or a damage entry
-    names its index. Damage that names no record (header, trailing bytes) does
-    not taint other records; with a single record it is attributed to that
-    record. A file being ``partial`` never makes intact records damaged.
-    """
+    """Extra (not in the contract). ``records_lost`` is only a heuristic."""
     if not records:
-        lost = 1 if status in ("partial", "damaged") else 0
+        lost = 1 if status in ("partial", "failed") and damage else 0
         return {"records_recovered": 0, "records_damaged": 0, "records_lost": lost}
     named = _damaged_record_keys(damage)
     damaged = 0
@@ -185,7 +253,7 @@ def _record_counts(records: list[Any], damage: list[dict[str, Any]], status: str
         if isinstance(record, dict):
             raw_key = record.get("index", record.get("record_index", position))
             key = raw_key if isinstance(raw_key, int) else position
-            flagged = record.get("complete") is False
+            flagged = record.get("complete") is False or record.get("verified") is False
         if flagged or key in named or (len(records) == 1 and damage):
             damaged += 1
     return {"records_recovered": len(records) - damaged, "records_damaged": damaged,
@@ -205,88 +273,87 @@ def _selected_confidence(identification: list[dict[str, Any]] | None) -> float:
 def shape_result(file_name: str, decoded: Any, *, fallback_format: str = "UNKNOWN",
                  identification: list[dict[str, Any]] | None = None,
                  debug: bool = False) -> dict[str, Any]:
-    """Convert a plugin Result to the slim per-file JSON schema.
-
-    The default output carries only what was recovered, what was lost, and the
-    selected format with its confidence. Rejected candidates and full analysis
-    detail appear only when ``debug`` is true.
-    """
+    """Convert a plugin Result to the contract's per-file JSON."""
     damage = [_damage_dict(item) for item in list(getattr(decoded, "damage", []) or [])]
-    records = list(getattr(decoded, "records", []) or [])
+    records = [r if isinstance(r, dict) else {"value": r}
+               for r in list(getattr(decoded, "records", []) or [])]
     data = getattr(decoded, "data", None)
-    status = _status(getattr(decoded, "status", "unsupported"))
-    if damage and status == "recovered":
-        status = "damaged"
+    fmt = normalize_format(getattr(decoded, "format", "") or fallback_format)
+    status = _status(getattr(decoded, "status", "unsupported"), fmt, bool(records), bool(damage))
     if isinstance(data, dict):
         # Keys starting with "_" are debug-only detail from a plugin.
         extra = {key: value for key, value in data.items() if str(key).startswith("_")}
-        data = {key: value for key, value in data.items() if not str(key).startswith("_")}
+        metadata = {key: value for key, value in data.items() if not str(key).startswith("_")}
         # A data key that just repeats the top-level records list adds nothing.
-        data = {key: value for key, value in data.items()
-                if not (records and isinstance(value, list) and value == records)}
+        metadata = {key: value for key, value in metadata.items()
+                    if not (records and isinstance(value, list) and value == records)}
         if debug and extra:
-            data["debug"] = {str(key).lstrip("_"): value for key, value in extra.items()}
+            metadata["debug"] = {str(key).lstrip("_"): value for key, value in extra.items()}
+    elif data is None:
+        metadata = {}
+    else:
+        metadata = {"value": data}
     result = {
-        "file_name": str(file_name),
-        "format": str(getattr(decoded, "format", "") or fallback_format),
-        "confidence": _selected_confidence(identification),
+        "source_file": str(file_name),
+        "format": fmt,
         "status": status,
-        "data": data,
-        "records": records,
-        "counts": _record_counts(records, damage, status),
+        "metadata": _clean(metadata),
+        "records": _clean(records),
         "damage": damage,
+        # extras kept from the earlier design
+        "confidence": _selected_confidence(identification),
+        "counts": _record_counts(records, damage, status),
         "errors": [str(item) for item in (getattr(decoded, "errors", []) or [])],
     }
     if debug and identification is not None:
-        # Candidate dictionaries may carry a live plugin reference for internal
-        # dispatch. Never leak that object into JSON output.
-        result["identification"] = [
+        result["identification"] = _clean([
             {key: value for key, value in candidate.items() if key != "plugin"}
             for candidate in identification
-        ]
+        ])
     return result
 
 
-def shape_failure(file_name: str, format_name: str, message: str, *, field: str = "file") -> dict[str, Any]:
-    damage = _damage_dict({"field": field, "offset": 0, "expected": 0, "found": 0,
-                           "reason": message, "byte_range": {"start": 0, "end": 0}})
+def shape_failure(file_name: str, format_name: str, message: str, *, field: str = "file",
+                  kind: str = "invalid_value") -> dict[str, Any]:
+    """Always-valid fallback for a file whose decoding or shaping went wrong."""
+    damage = _damage_dict({"field": field, "kind": kind, "offset": 0, "expected": 0,
+                           "found": 0, "reason": message, "lossy": True,
+                           "byte_range": {"start": 0, "end": 0}})
     return {
-        "file_name": str(file_name), "format": str(format_name), "confidence": 0.0,
-        "status": "error", "data": None, "records": [],
+        "source_file": str(file_name), "format": normalize_format(format_name),
+        "status": "failed", "metadata": {}, "records": [], "damage": [damage],
+        "confidence": 0.0, "errors": [str(message)],
         "counts": {"records_recovered": 0, "records_damaged": 0, "records_lost": 0},
-        "damage": [damage], "errors": [str(message)],
     }
 
 
 def shape_failure_entry(path: str, stage: str, error: BaseException | str) -> dict[str, Any]:
     detail = f"{type(error).__name__}: {error}" if isinstance(error, BaseException) else str(error)
-    return {"path": str(path), "status": "error", "stage": stage, "error": detail}
+    return {"path": str(path), "status": "failed", "stage": stage, "error": detail}
 
 
 def shape_report(results: list[dict[str, Any]], failures: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Batch summary: one short entry per file, no repeated per-file results."""
+    """Batch summary in the contract's report.json shape."""
     failures = sorted(list(failures or []), key=lambda f: (str(f.get("path", "")), str(f.get("stage", "")), str(f.get("error", ""))))
-    results = sorted(results, key=lambda r: str(r.get("file_name", "")))
-    counts = Counter(item.get("status", "error") for item in results)
+    results = sorted(results, key=lambda r: str(r.get("source_file", "")))
+    counts = Counter(item.get("status", "failed") for item in results)
     empty = {"records_recovered": 0, "records_damaged": 0, "records_lost": 0}
 
     def total(key: str) -> int:
         return sum(item.get("counts", {}).get(key, 0) for item in results)
 
     return {
-        "tool": "SALVAGE",
-        "files_processed": len(results),
-        "status_counts": {key: counts.get(key, 0) for key in STATUS_VOCABULARY},
-        "records_recovered": total("records_recovered"),
-        "records_damaged": total("records_damaged"),
-        "records_lost": total("records_lost"),
-        "failures": failures,
+        "tool_version": TOOL_VERSION,
+        "totals": {key: counts.get(key, 0) for key in STATUS_VOCABULARY},
         "files": [
             {
-                "file_name": item.get("file_name", ""),
-                "format": item.get("format", "UNKNOWN"),
-                "confidence": item.get("confidence", _selected_confidence(item.get("identification"))),
-                "status": item.get("status", "error"),
+                "file": item.get("source_file", ""),
+                "format": normalize_format(item.get("format", "UNKNOWN")),
+                "status": item.get("status", "failed"),
+                "records": len(item.get("records", [])),
+                "damage": len(item.get("damage", [])),
+                # extras kept from the earlier design
+                "confidence": item.get("confidence", 0.0),
                 "counts": item.get("counts", dict(empty)),
                 "byte_ranges": [d["byte_range"] for d in item.get("damage", []) if "byte_range" in d],
                 "warnings": [str(d.get("reason", "")) for d in item.get("damage", [])]
@@ -294,4 +361,11 @@ def shape_report(results: list[dict[str, Any]], failures: list[dict[str, Any]] |
             }
             for item in results
         ],
+        # extras
+        "tool": "SALVAGE",
+        "files_processed": len(results),
+        "records_recovered": total("records_recovered"),
+        "records_damaged": total("records_damaged"),
+        "records_lost": total("records_lost"),
+        "failures": failures,
     }
