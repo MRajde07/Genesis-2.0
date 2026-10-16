@@ -20,10 +20,10 @@ def inspect_bytes(file_name: str, data: bytes, registry: PluginRegistry | None =
             decoded = plugin.decode(data)
             if not isinstance(decoded, Result):
                 raise TypeError("decoder did not return Result")
-            return shape_result(file_name, decoded, fallback_format=plugin.name,
-                                identification=candidates, debug=debug)
+            return shape_result(file_name, decoded, fallback_format=plugin.public_format,
+                                identification=candidates, debug=debug, internal_format=plugin.name)
         except Exception as error:
-            return shape_failure(file_name, plugin.name,
+            return shape_failure(file_name, plugin.public_format,
                                  f"Decoder failed: {type(error).__name__}: {error}", field="decoder")
     except Exception as error:
         return shape_failure(file_name, "UNKNOWN",

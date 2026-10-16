@@ -29,7 +29,7 @@ class JSONWriterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'bad.json'
             with self.assertRaises(SchemaValidationError):
-                write_json(path, {'file_name': 'bad'})
+                write_json(path, {'source_file': 'bad'})
             self.assertFalse(path.exists())
 
     def test_rejects_bool_as_integer_and_extra_damage_fields(self):
@@ -44,10 +44,10 @@ class JSONWriterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             a = Path(tmp) / 'a.json'
             b = Path(tmp) / 'b.json'
-            payload = {'file_name': 'x', 'format': 'UNKNOWN', 'status': 'unsupported',
-                       'data': {'z': 1, 'a': 2}, 'records': [],
+            payload = {'source_file': 'x', 'format': 'UNKNOWN', 'status': 'unsupported',
+                       'metadata': {'z': 1, 'a': 2}, 'records': [], 'damage': [],
                        'counts': {'records_lost': 0, 'records_recovered': 0, 'records_damaged': 0},
-                       'damage': [], 'byte_ranges': [], 'errors': []}
+                       'byte_ranges': [], 'errors': []}
             write_json(a, payload)
             write_json(b, dict(reversed(list(payload.items()))))
             self.assertEqual(a.read_bytes(), b.read_bytes())
@@ -57,7 +57,7 @@ class JSONWriterTests(unittest.TestCase):
         a = shape_result('a.bin', STUDPlugin().decode(b'STUD\x01\x03A'), fallback_format='STUD')
         b = shape_result('b.bin', STUDPlugin().decode(b'STUD\x01\x01B'), fallback_format='STUD')
         report = shape_report([b, a])
-        self.assertEqual([f['file_name'] for f in report['files']], ['a.bin', 'b.bin'])
+        self.assertEqual([f['file'] for f in report['files']], ['a.bin', 'b.bin'])
         self.assertTrue(report['files'][0]['warnings'])
         validate_schema(report, load_schema('report.schema.json'))
 

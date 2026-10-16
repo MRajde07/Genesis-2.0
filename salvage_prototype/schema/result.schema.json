@@ -1,129 +1,348 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "SALVAGE per-file result",
+  "description": "SALVAGE output contract. Top-level fields are mandatory. Format-specific required record fields are specified by the organiser contract and must be enforced by decoders; this schema remains compatible with SALVAGE's built-in subset validator.",
   "type": "object",
   "required": [
-    "file_name",
+    "source_file",
     "format",
     "status",
-    "data",
+    "metadata",
     "records",
-    "counts",
-    "damage",
-    "errors"
+    "damage"
   ],
   "properties": {
-    "file_name": {
-      "type": "string"
+    "source_file": {
+      "type": "string",
+      "minLength": 1
     },
     "format": {
-      "type": "string"
-    },
-    "status": {
+      "type": "string",
       "enum": [
-        "recovered",
-        "partial",
-        "damaged",
-        "unsupported",
-        "error"
+        "LIBRA-98",
+        "LABLOG",
+        "VAULT",
+        "WKS",
+        "WPD",
+        "BRAVO",
+        "CVT",
+        "EBCDIC-DUMP",
+        "WAD",
+        "PAK",
+        "UNKNOWN"
       ]
     },
-    "data": {},
+    "status": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "partial",
+        "unsupported",
+        "unrecognized",
+        "failed"
+      ]
+    },
+    "metadata": {
+      "type": "object"
+    },
     "records": {
       "type": "array",
       "items": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "author": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "year": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "price_cents": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "copies": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "isbn": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "checked_out": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "deleted": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "reference_only": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "due_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sample": {
+            "type": "integer"
+          },
+          "time_ms": {
+            "type": "number"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "bitmap",
+              "binary",
+              "paragraph",
+              "page_break",
+              "label",
+              "integer",
+              "number",
+              "formula",
+              "blank"
+            ]
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "compressed": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cell": {
+            "type": "string"
+          },
+          "row": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "col": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "value": {
+            "type": [
+              "string",
+              "number",
+              "integer",
+              "boolean",
+              "null"
+            ]
+          },
+          "alignment": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right",
+              "center",
+              "repeat"
+            ]
+          },
+          "number_format": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "iso_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_value": {
+            "type": [
+              "string",
+              "number",
+              "integer",
+              "boolean",
+              "null"
+            ]
+          },
+          "formula_raw_hex": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "slot": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "student_id": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          },
+          "dob": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "gpa": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "credits": {
+            "type": [
+              "integer",
+              "number",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "balance": {
+            "type": [
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "truncated",
+                "crc_mismatch",
+                "checksum_mismatch",
+                "bad_length",
+                "unparsed_bytes",
+                "count_mismatch",
+                "invalid_value",
+                "oob_pointer",
+                "index_missing",
+                "header_checksum",
+                "encrypted",
+                "unknown_record"
+              ]
+            }
+          }
+        },
+        "additionalProperties": true
       }
-    },
-    "counts": {
-      "type": "object",
-      "required": [
-        "records_recovered",
-        "records_damaged",
-        "records_lost"
-      ],
-      "properties": {
-        "records_recovered": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "records_damaged": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "records_lost": {
-          "type": "integer",
-          "minimum": 0
-        }
-      },
-      "additionalProperties": false
     },
     "damage": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": [
-          "field",
-          "offset",
-          "expected",
-          "found",
-          "reason",
-          "byte_range"
-        ],
         "properties": {
-          "field": {
-            "type": "string"
+          "kind": {
+            "type": "string",
+            "enum": [
+              "truncated",
+              "crc_mismatch",
+              "checksum_mismatch",
+              "bad_length",
+              "unparsed_bytes",
+              "count_mismatch",
+              "invalid_value",
+              "oob_pointer",
+              "index_missing",
+              "header_checksum",
+              "encrypted",
+              "unknown_record"
+            ]
           },
           "offset": {
             "type": "integer",
             "minimum": 0
           },
-          "expected": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "found": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "reason": {
+          "detail": {
             "type": "string"
           },
-          "byte_range": {
-            "type": "object",
-            "required": [
-              "start",
-              "end"
-            ],
-            "properties": {
-              "start": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "end": {
-                "type": "integer",
-                "minimum": 0
-              }
-            },
-            "additionalProperties": false
-          },
-          "raw_hex": {
-            "type": "string"
+          "lossy": {
+            "type": "boolean"
           }
         },
-        "additionalProperties": false
+        "required": [
+          "kind",
+          "offset",
+          "detail",
+          "lossy"
+        ],
+        "additionalProperties": true
       }
-    },
-    "errors": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "confidence": {
-      "type": "number",
-      "minimum": 0,
-      "maximum": 1
     }
   },
   "additionalProperties": true

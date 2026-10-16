@@ -17,24 +17,24 @@ class OutputShapeTests(unittest.TestCase):
             "records_recovered": 0, "records_damaged": 1, "records_lost": 0
         })
         damage = shaped["damage"][0]
-        self.assertEqual(set(damage), {"field", "offset", "expected", "found", "reason", "byte_range"})
+        self.assertTrue({"kind", "offset", "detail", "lossy", "field", "expected", "found", "reason", "byte_range"}.issubset(damage))
         self.assertEqual(damage["byte_range"], {"start": 8, "end": 11})
 
     def test_invalid_utf8_keeps_raw_hex_without_replacement_character(self):
         # One invalid UTF-8 byte, with a complete name field.
         decoded = STUDPlugin().decode(b"STUD\x01\x01\xff")
         shaped = shape_result("bad-name.bin", decoded, fallback_format="STUD")
-        self.assertEqual(shaped["status"], "damaged")
-        self.assertIsNone(shaped["data"]["name"])
-        self.assertEqual(shaped["data"]["name_raw_hex"], "ff")
-        self.assertNotIn("\ufffd", repr(shaped["data"]))
+        self.assertEqual(shaped["status"], "partial")
+        self.assertIsNone(shaped["metadata"]["name"])
+        self.assertEqual(shaped["metadata"]["name_raw_hex"], "ff")
+        self.assertNotIn("\ufffd", repr(shaped["metadata"]))
         self.assertEqual(shaped["damage"][0]["byte_range"], {"start": 6, "end": 7})
         self.assertEqual(shaped["counts"]["records_damaged"], 1)
         self.assertEqual(shaped["counts"]["records_recovered"], 0)
 
     def test_complete_stud_has_recovered_status_and_zero_damage(self):
         shaped = shape_result("ok.bin", STUDPlugin().decode(b"STUD\x01\x03Anu"), fallback_format="STUD")
-        self.assertEqual(shaped["status"], "recovered")
+        self.assertEqual(shaped["status"], "ok")
         self.assertEqual(shaped["counts"]["records_recovered"], 1)
         self.assertEqual(shaped["counts"]["records_damaged"], 0)
         self.assertEqual(shaped["counts"]["records_lost"], 0)

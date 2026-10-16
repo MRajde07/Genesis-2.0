@@ -26,9 +26,9 @@ class SalvageTests(unittest.TestCase):
             process = self.run_salvage(input_dir, output_dir)
             self.assertEqual(process.returncode, 0, process.stderr)
             result = json.loads((output_dir / "student.bin.json").read_text(encoding="utf-8"))
-            self.assertEqual(result["format"], "STUD")
-            self.assertEqual(result["status"], "recovered")
-            self.assertEqual(result["data"]["name"], "Anu")
+            self.assertEqual(result["format"], "UNKNOWN")
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["metadata"]["name"], "Anu")
 
     def test_unknown_file(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -38,7 +38,7 @@ class SalvageTests(unittest.TestCase):
             self.assertEqual(process.returncode, 0, process.stderr)
             result = json.loads((output_dir / "unknown.bin.json").read_text(encoding="utf-8"))
             self.assertEqual(result["format"], "UNKNOWN")
-            self.assertEqual(result["status"], "unsupported")
+            self.assertEqual(result["status"], "unrecognized")
 
     def test_truncated_stud_file(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -47,7 +47,7 @@ class SalvageTests(unittest.TestCase):
             process = self.run_salvage(input_dir, output_dir)
             self.assertEqual(process.returncode, 0, process.stderr)
             result = json.loads((output_dir / "damaged.bin.json").read_text(encoding="utf-8"))
-            self.assertEqual(result["format"], "STUD")
+            self.assertEqual(result["format"], "UNKNOWN")
             self.assertEqual(result["status"], "partial")
             self.assertTrue(result["damage"])
 
@@ -58,7 +58,7 @@ class SalvageTests(unittest.TestCase):
             process = self.run_salvage(input_dir, output_dir)
             self.assertEqual(process.returncode, 0, process.stderr)
             result = json.loads((output_dir / "empty.bin.json").read_text(encoding="utf-8"))
-            self.assertEqual(result["status"], "unsupported")
+            self.assertEqual(result["status"], "unrecognized")
 
     def test_batch_report(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -9,9 +9,12 @@ from .real import AsterRecordsPlugin, CRCBlocksPlugin, XIDXPlugin, LotusWKSPlugi
 
 class PluginRegistry:
     def __init__(self, plugins: list[FormatPlugin] | None = None):
-        self._plugins: list[FormatPlugin] = list(plugins or [
-            STUDPlugin(), AsterRecordsPlugin(), CRCBlocksPlugin(), XIDXPlugin(), LotusWKSPlugin(), GenericPlugin()
-        ])
+        if plugins is None:
+            # Lazy import avoids a package cycle: learned specs reuse formats.base.
+            from ..learned import load_specs
+            plugins = [STUDPlugin(), AsterRecordsPlugin(), CRCBlocksPlugin(), XIDXPlugin(),
+                       LotusWKSPlugin(), *load_specs(), GenericPlugin()]
+        self._plugins: list[FormatPlugin] = list(plugins)
 
     def register(self, plugin: FormatPlugin) -> None:
         self._plugins.append(plugin)

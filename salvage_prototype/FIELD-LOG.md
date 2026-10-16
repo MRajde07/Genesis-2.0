@@ -162,3 +162,11 @@ The Dockerfile uses `ARG PYTHON_VERSION` (default `3.12`), copies the repository
 
 ### Conclusion
 The build is offline only when the selected `python:<version>-slim` base image is already cached locally. No claim is made that Docker can create a missing base image without network access. Actual image build/run remains environment-dependent.
+
+## Learned-spec prototype (synthetic fixtures only)
+
+- Added `LEARNED_STUD` and `LEARNED_ASTER` JSON specs, interpreted by the generic stdlib-only `SpecPlugin`.
+- The specs reuse `FieldSpec` / `BlockSpec`; signature, minimum length, fixed fields, fixed-stride records, validation diagnostics, and optional checksum verification are declarative.
+- Added `tools/train.py` for conservative flat scalar-field inference from at least two training pairs plus one filename-sorted holdout pair. It requires a common signature of at least four bytes, uniquely located encodings, non-overlapping fields, consistent truth keys, and successful holdout decoding.
+- Training is intentionally limited: no variable-length structures, nested expected objects, RLE/XOR transforms, or inferred checksum layouts. Ambiguity causes refusal, not a speculative spec.
+- The learned specs remain registered alongside the legacy decoders for parity experiments. They do not replace legacy implementations; full result-shape equivalence has not been claimed.

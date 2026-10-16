@@ -1,0 +1,29 @@
+{
+  "name": "LEARNED_ASTER",
+  "public_format": "UNKNOWN",
+  "description": "Declarative fixed-record layout for the local synthetic ARCF fixture; not an external format claim.",
+  "signature_hex": "41524346",
+  "signature_offset": 0,
+  "minimum_length": 8,
+  "endianness": "big",
+  "fields": [
+    {"name": "signature", "type": "fixed_bytes", "length": 4, "offset": 0},
+    {"name": "version", "type": "u16", "offset": 4, "minimum": 1, "maximum": 2},
+    {"name": "record_count", "type": "u16", "offset": 6, "maximum": 100000}
+  ],
+  "records": {
+    "name": "records",
+    "count_field": "record_count",
+    "offset": 8,
+    "stride": 12,
+    "fields": [
+      {"name": "item_id", "type": "u16", "offset": 0},
+      {"name": "kind", "type": "u8", "offset": 2},
+      {"name": "nominal_span", "type": "u16", "offset": 3},
+      {"name": "quantity", "type": "u16", "offset": 5},
+      {"name": "score", "type": "i16", "offset": 7},
+      {"name": "code", "type": "fixed_string", "length": 3, "offset": 9, "encoding": "ascii"}
+    ]
+  },
+  "confidence": 0.9
+}

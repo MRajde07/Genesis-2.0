@@ -27,27 +27,35 @@ class SlimOutputTests(unittest.TestCase):
         self.assertEqual(result["confidence"], 1.0)
         validate_schema(result, load_schema("result.schema.json"))
 
+    def test_internal_practice_format_is_publicly_unknown_but_wks_is_public_wks(self):
+        practice = inspect_bytes("practice.bin", b"STUD\x01\x03Ana")
+        wks = inspect_bytes("small.wks", wks_with_housekeeping())
+        self.assertEqual(practice["format"], "UNKNOWN")
+        self.assertEqual(wks["format"], "WKS")
+        validate_schema(practice, load_schema("result.schema.json"))
+        validate_schema(wks, load_schema("result.schema.json"))
+
     def test_unknown_file_gets_short_summary(self):
         data = bytes(range(256)) * 16
         result = inspect_bytes("blob.bin", data)
         self.assertEqual(result["format"], "UNKNOWN")
-        self.assertNotIn("integer_candidates", result["data"])
-        self.assertNotIn("_full_analysis", result["data"])
+        self.assertNotIn("integer_candidates", result["metadata"])
+        self.assertNotIn("_full_analysis", result["metadata"])
         self.assertLess(len(json.dumps(result)), 3000)
         debug = inspect_bytes("blob.bin", data, debug=True)
-        self.assertIn("integer_candidates", debug["data"]["debug"]["full_analysis"])
+        self.assertIn("integer_candidates", debug["metadata"]["debug"]["full_analysis"])
         self.assertIn("identification", debug)
 
     def test_empty_file_is_minimal(self):
         result = inspect_bytes("empty.bin", b"")
-        self.assertEqual(result["data"]["content_guess"], "empty")
+        self.assertEqual(result["metadata"]["content_guess"], "empty")
         self.assertLess(len(json.dumps(result)), 1500)
 
     def test_report_has_no_duplicated_results(self):
         results = [inspect_bytes("a.bin", b"STUD\x01\x03Ana"), inspect_bytes("b.bin", b"zzzzzz")]
         report = shape_report(results)
         self.assertNotIn("results", report)
-        self.assertEqual([f["file_name"] for f in report["files"]], ["a.bin", "b.bin"])
+        self.assertEqual([f["file"] for f in report["files"]], ["a.bin", "b.bin"])
         validate_schema(report, load_schema("report.schema.json"))
 
     def test_partial_file_does_not_make_intact_records_damaged(self):

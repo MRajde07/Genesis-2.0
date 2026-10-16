@@ -102,8 +102,8 @@ class FieldDecode:
 
 
 _NUMERIC = {
-    "u8": (1, False, False), "u16": (2, False, False), "u32": (4, False, False),
-    "i8": (1, True, False), "i16": (2, True, False), "i32": (4, True, False),
+    "u8": (1, False, False), "u16": (2, False, False), "u32": (4, False, False), "u64": (8, False, False),
+    "i8": (1, True, False), "i16": (2, True, False), "i32": (4, True, False), "i64": (8, True, False),
     "f32": (4, True, True), "float32": (4, True, True), "float": (4, True, True),
     "f64": (8, True, True), "float64": (8, True, True), "double": (8, True, True),
 }
@@ -507,8 +507,13 @@ def decode_fields(data: bytes, fields: Sequence[FieldSpec | Mapping[str, Any]], 
 
 
 class FormatPlugin:
-    """Base class for offline format decoders, including declarative formats."""
+    """Base class for offline format decoders, including declarative formats.
+
+    ``name`` is the internal decoder identifier; ``public_format`` is the
+    organiser-vocabulary name used only when shaping output.
+    """
     name = "UNKNOWN"
+    public_format = "UNKNOWN"
 
     def detect(self, data: bytes) -> float:
         raise NotImplementedError

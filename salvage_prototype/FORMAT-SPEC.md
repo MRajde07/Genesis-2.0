@@ -124,3 +124,11 @@ These are parser capabilities, not evidence that a target format uses a given co
 ## Official challenge formats
 
 No official hidden challenge format has been independently confirmed in this repository yet. Add a format section only after testing field offsets, lengths, endianness, checksum rules and recovery behaviour against an authoritative specification or representative samples.
+
+## Declarative learned-spec interpreter
+
+The interpreter under `src/salvage/learned/` consumes JSON-only specs. It supports a fixed header field list, an optional fixed-stride record section (`count_field`, `offset`, `stride`, and field specs), and optional checksum blocks using the shared `FieldSpec` / `BlockSpec` engine. The signature and minimum file length contribute to identification; structural bounds and declared checksums are validated when present. Invalid or truncated bytes are diagnosed and never repaired. The interpreter imposes a maximum declared record count of 1,000,000 and only iterates records that could fit in the input.
+
+The current `tools/train.py` is intentionally conservative: it infers only flat fixed-width scalar fields that are uniquely located across multiple samples and verifies the final sorted sample as a holdout. It refuses nested data, transformations, and ambiguous field layouts. A rejected training set is not evidence that the format is unsupported; it means the current inference method cannot justify a safe spec.
+
+The checked-in `LEARNED_STUD` and `LEARNED_ASTER` specs are demonstrations of declarative interpretation on synthetic fixture formats. They are not claims about external file formats and are not yet substitutes for the legacy decoders' complete output shapes.

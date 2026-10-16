@@ -43,6 +43,7 @@ class LotusWKSPlugin(FormatPlugin):
     """Decode WKS cells without pretending to understand formula opcodes."""
 
     name = "LOTUS_WKS"
+    public_format = "WKS"
     signature = BOF_SIGNATURE
     header_length = len(BOF_SIGNATURE)
 

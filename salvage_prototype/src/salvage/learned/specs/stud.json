@@ -1,0 +1,16 @@
+{
+  "name": "LEARNED_STUD",
+  "public_format": "UNKNOWN",
+  "description": "Conservative declarative model of the repository's synthetic STUD fixture.",
+  "signature_hex": "53545544",
+  "signature_offset": 0,
+  "minimum_length": 6,
+  "endianness": "little",
+  "fields": [
+    {"name": "signature", "type": "fixed_bytes", "length": 4, "offset": 0, "validators": ["one_of:53545544"]},
+    {"name": "version", "type": "u8", "offset": 4, "minimum": 1},
+    {"name": "name_length", "type": "u8", "offset": 5, "minimum": 1},
+    {"name": "name", "type": "fixed_string", "length_source": "name_length", "encoding": "utf-8", "offset": 6, "max_length": 4096}
+  ],
+  "confidence": 0.9
+}

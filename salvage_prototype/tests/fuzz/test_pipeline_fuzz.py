@@ -146,18 +146,23 @@ class PipelineFuzzTests(unittest.TestCase):
                 report = json.loads(report_file.read_text(encoding="utf-8"))
                 self.assertIsInstance(result, dict)
                 self.assertIsInstance(report, dict)
-                self.assertEqual(result.get("file_name"), mutation["file"])
-                self.assertIn(result.get("status"), {"recovered", "partial", "damaged", "unsupported", "error"})
+                self.assertEqual(result.get("source_file"), mutation["file"])
+                self.assertIn(result.get("status"), {"ok", "partial", "unsupported", "unrecognized", "failed"})
                 self.assertTrue(report.get("files"))
-                self.assertEqual(report["files"][0]["file_name"], mutation["file"])
+                self.assertEqual(report["files"][0]["file"], mutation["file"])
 
                 # Every field whose source bytes were not touched must still
                 # equal its ground truth. Fields whose source/dependencies were
                 # mutated are excluded: without a checksum or redundancy, a
                 # bit flip in an otherwise-valid field is not distinguishable
                 # from a legitimate value and must not be falsely called known.
-                actual = flatten(result.get("data") or {})
-                expected = flatten(truth["expected"])
+                actual_data = dict(result.get("metadata") or {})
+                expected_root = truth["expected"]
+                for collection_key in ("records", "blocks", "entries"):
+                    if collection_key in expected_root and result.get("records"):
+                        actual_data[collection_key] = result["records"]
+                actual = flatten(actual_data)
+                expected = flatten(expected_root)
                 ranges = field_ranges(truth["format"], original, truth)
                 start, end = mutation["start"], mutation["end"]
                 for path, expected_value in expected.items():

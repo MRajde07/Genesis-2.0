@@ -50,8 +50,8 @@ class RealFormatGoldenTests(unittest.TestCase):
                 data = (self.directory / filename).read_bytes()
                 self.assertEqual(select_plugin(data, registry).name, format_name)
                 shaped = inspect_bytes(filename, data, registry)
-                self.assertEqual(shaped["format"], format_name)
-                self.assertEqual(shaped["status"], "recovered")
+                self.assertEqual(shaped["format"], "UNKNOWN")
+                self.assertEqual(shaped["status"], "ok")
 
     def test_aster_nominal_span_is_not_used_as_a_length(self):
         path = self.directory / "aster_records.bin"

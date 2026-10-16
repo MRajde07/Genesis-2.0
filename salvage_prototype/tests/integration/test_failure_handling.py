@@ -48,7 +48,7 @@ class FailureHandlingTests(unittest.TestCase):
             self.assertEqual(main([str(source), str(output)]), 0)
             result = json.loads((output / "empty.bin.json").read_text(encoding="utf-8"))
             report = json.loads((output / "report.json").read_text(encoding="utf-8"))
-            self.assertEqual(result["status"], "unsupported")
+            self.assertEqual(result["status"], "unrecognized")
             self.assertEqual(report["files_processed"], 1)
 
     def test_unreadable_file_result_is_reported(self):
@@ -60,7 +60,7 @@ class FailureHandlingTests(unittest.TestCase):
             report = json.loads((output / "report.json").read_text(encoding="utf-8"))
             self.assertTrue(any(f["stage"] == "process_file" for f in report["failures"]))
             result = json.loads((output / "blocked.bin.json").read_text(encoding="utf-8"))
-            self.assertEqual(result["status"], "error")
+            self.assertEqual(result["status"], "failed")
 
     def test_raising_plugin_is_caught_and_reported(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -71,7 +71,7 @@ class FailureHandlingTests(unittest.TestCase):
             report = json.loads((output / "report.json").read_text(encoding="utf-8"))
             self.assertTrue(any(f["stage"] == "process_file" for f in report["failures"]))
             result = json.loads((output / "sample.bin.json").read_text(encoding="utf-8"))
-            self.assertEqual(result["status"], "error")
+            self.assertEqual(result["status"], "failed")
             self.assertIn("deliberate decoder failure", " ".join(result["errors"]))
 
     def test_run_level_exception_still_returns_zero(self):
@@ -83,7 +83,7 @@ class FailureHandlingTests(unittest.TestCase):
 
     def test_pipeline_catches_raising_plugin(self):
         result = inspect_bytes("x.bin", b"x", PluginRegistry([RaisingPlugin()]))
-        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["status"], "failed")
         self.assertIn("deliberate decoder failure", result["errors"][0])
 
 

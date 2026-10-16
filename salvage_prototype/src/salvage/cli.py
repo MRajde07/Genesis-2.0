@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
                                            f"Unexpected file processing failure: {type(error).__name__}: {error}",
                                            field="process_file")
                     failures.append(_failure(entry, "process_file", error))
-                if result.get("status") == "error" and not any(
+                if result.get("status") == "failed" and not any(
                     item.get("path") == str(entry) and item.get("stage") == "process_file"
                     for item in failures
                 ):

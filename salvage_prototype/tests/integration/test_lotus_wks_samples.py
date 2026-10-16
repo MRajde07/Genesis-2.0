@@ -25,7 +25,7 @@ class RealLotusWKSSampleTests(unittest.TestCase):
                 self.assertIn(decoded.status, {"recovered", "partial", "damaged"})
                 self.assertIsInstance(decoded.data, dict)
                 shaped = inspect_bytes(path.name, data)
-                self.assertIn(shaped["status"], {"recovered", "partial", "damaged"})
+                self.assertIn(shaped["status"], {"ok", "partial", "failed"})
                 self.assertIsInstance(shaped["damage"], list)
                 self.assertIsInstance(shaped["errors"], list)
 
