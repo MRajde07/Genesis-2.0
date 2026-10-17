@@ -1,0 +1,23 @@
+{
+  "confidence": 1.0,
+  "counts": {
+    "records_damaged": 0,
+    "records_lost": 0,
+    "records_recovered": 1
+  },
+  "damage": [],
+  "errors": [],
+  "format": "UNKNOWN",
+  "metadata": {
+    "name": "Anu",
+    "version": 1
+  },
+  "records": [
+    {
+      "name": "Anu",
+      "version": 1
+    }
+  ],
+  "source_file": "student.bin",
+  "status": "unrecognized"
+}

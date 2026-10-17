@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 from typing import Any
 
+from .bytemap import render_html, report_ranges
 from .output import shape_failure, shape_failure_entry, write_json
 from .pipeline import inspect_file
 from .report import build_report
@@ -20,7 +21,11 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
     parser.add_argument("output_dir", help="Folder for JSON output")
     parser.add_argument("--debug", action="store_true",
                         help="Include rejected-format evidence and full analysis detail in the JSON")
+    parser.add_argument("--no-bytemap", action="store_true",
+                        help="Do not write the byte coverage report (report.html)")
     debug = False
+    map_entries: list[dict[str, Any]] = []
+    map_inputs: dict[str, bytes] = {}
     results: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
     output_dir: Path | None = None
@@ -29,6 +34,7 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
             args = parser.parse_args(argv)
             input_dir, output_dir = Path(args.input_dir), Path(args.output_dir)
             debug = bool(args.debug)
+            want_map = not args.no_bytemap
         except BaseException as error:
             # argparse normally raises SystemExit for malformed CLI arguments.
             print(f"SALVAGE: invalid invocation: {type(error).__name__}: {error}")
@@ -62,7 +68,8 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
                     failures.append(_failure(entry, "inspect_entry", "entry is not a regular file (subdirectories are not traversed)"))
                     continue
                 try:
-                    result = inspect_file(entry, registry, debug=debug)
+                    sink: dict[str, Any] = {}
+                    result = inspect_file(entry, registry, debug=debug, bytemap_sink=sink)
                     if not isinstance(result, dict):
                         raise TypeError("file processor did not return a result object")
                 except Exception as error:
@@ -76,6 +83,11 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
                 ):
                     failures.append(_failure(entry, "process_file", "; ".join(result.get("errors", [])) or "processing failed"))
                 results.append(result)
+                if want_map and sink.get("_error"):
+                    print(f"SALVAGE: byte map skipped for {entry.name}: {sink['_error']}")
+                elif want_map and sink:
+                    map_entries.append({"file_name": entry.name, "format": result.get("format"),
+                                        "status": result.get("status"), "bytemap": sink})
                 try:
                     write_json(output_dir / f"{entry.name}.json", result)
                 except Exception as error:
@@ -86,11 +98,22 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
 
         # Include per-file failures in the report's results as well as its
         # dedicated failures list, so a report consumer cannot miss them.
-        report = build_report(results, failures)
+        ranges = {m["file_name"]: report_ranges(m["bytemap"]) for m in map_entries} if want_map else None
+        report = build_report(results, failures, ranges)
         try:
             write_json(output_dir / "report.json", report)
         except Exception as error:
             print(f"SALVAGE: could not write report: {type(error).__name__}: {error}")
+        if want_map and map_entries:
+            try:
+                for item in map_entries:
+                    try:
+                        map_inputs[item["file_name"]] = (input_dir / item["file_name"]).read_bytes()[:8192]
+                    except Exception:
+                        pass
+                (output_dir / "report.html").write_text(render_html(map_entries, map_inputs), encoding="utf-8")
+            except Exception as error:
+                print(f"SALVAGE: could not write byte coverage report: {type(error).__name__}: {error}")
         print(f"\nDone! Processed {len(results)} file(s); recorded {len(failures)} failure(s).")
     except BaseException as error:
         # Final guard to honor the CLI's zero-exit contract even for unexpected

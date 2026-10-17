@@ -2,6 +2,7 @@
 from __future__ import annotations
 import zlib
 from ..base import Damage, FormatPlugin, Result
+from ...bytemap import span
 
 MAGIC = b"CRCB"
 HEADER_SIZE = 7
@@ -37,6 +38,7 @@ class CRCBlocksPlugin(FormatPlugin):
         version = data[4]
         count = int.from_bytes(data[5:7], "little")
         blocks = []
+        spans = [span(0, HEADER_SIZE, "header", "magic, version, block count")]
         cursor = HEADER_SIZE
         for index in range(count):
             if cursor + 2 > len(data):
@@ -45,12 +47,14 @@ class CRCBlocksPlugin(FormatPlugin):
                 break
             payload_len = int.from_bytes(data[cursor:cursor+2], "little")
             length_offset = cursor
+            spans.append(span(cursor, cursor + 2, "decoded", f"blocks[{index}].length"))
             payload_offset = cursor + 2
             payload_end = payload_offset + payload_len
             crc_offset = payload_end
             block_end = crc_offset + 4
             payload = data[payload_offset:min(payload_end, len(data))]
             if len(payload) < payload_len:
+                spans.append(span(payload_offset, payload_offset + len(payload), "damaged", f"blocks[{index}] truncated payload"))
                 result.damage.append(Damage(f"blocks[{index}].payload", payload_offset + len(payload), payload_len, len(payload),
                     "truncated CRCB block payload", (payload_offset + len(payload), payload_end), payload.hex()))
                 blocks.append({"index": index, "length": payload_len, "payload_raw_hex": payload.hex(),
@@ -69,6 +73,9 @@ class CRCBlocksPlugin(FormatPlugin):
                     result.damage.append(Damage(f"blocks[{index}].crc32", crc_offset, 4, 4,
                         f"CRC32 mismatch: stored={stored_crc}, calculated={calculated}",
                         (crc_offset, block_end), data[crc_offset:block_end].hex()))
+            spans.append(span(payload_offset, payload_end, "verified" if crc_valid else "decoded", f"blocks[{index}].payload"))
+            if crc_valid is not None:
+                spans.append(span(crc_offset, block_end, "verified" if crc_valid else "decoded", f"blocks[{index}].crc32"))
             sequence = int.from_bytes(payload[0:2], "little") if len(payload) >= 2 else None
             reading = int.from_bytes(payload[2:6], "little", signed=True) if len(payload) >= 6 else None
             label_len = payload[6] if len(payload) >= 7 else None
@@ -96,7 +103,7 @@ class CRCBlocksPlugin(FormatPlugin):
         if cursor < len(data) and len(blocks) == count:
             result.damage.append(Damage("trailing_bytes", cursor, 0, len(data)-cursor,
                 "bytes remain after declared blocks", (cursor, len(data)), data[cursor:].hex()))
-        result.data = {"version": version, "block_count": count, "blocks": blocks}
+        result.data = {"version": version, "block_count": count, "blocks": blocks, "_spans": spans}
         result.records = [dict(block) for block in blocks]
         if result.damage:
             result.status = "partial" if blocks else "damaged"

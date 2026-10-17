@@ -1,0 +1,26 @@
+{
+  "confidence": 0.0055,
+  "counts": {
+    "records_damaged": 0,
+    "records_lost": 0,
+    "records_recovered": 0
+  },
+  "damage": [],
+  "errors": [
+    "Format not recognised; heuristic summary only, nothing decoded"
+  ],
+  "format": "UNKNOWN",
+  "metadata": {
+    "analysis_truncated": false,
+    "ascii_strings": [],
+    "content_guess": "empty",
+    "entropy_bits_per_byte": 0.0,
+    "header_hex": "",
+    "printable_ratio": 0.0,
+    "size_bytes": 0,
+    "unverified": true
+  },
+  "records": [],
+  "source_file": "unkown.bin",
+  "status": "unrecognized"
+}

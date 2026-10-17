@@ -1,0 +1,38 @@
+{
+  "confidence": 1.0,
+  "counts": {
+    "records_damaged": 1,
+    "records_lost": 0,
+    "records_recovered": 0
+  },
+  "damage": [
+    {
+      "byte_range": {
+        "end": 11,
+        "start": 8
+      },
+      "detail": "out of range: insufficient bytes",
+      "expected": 5,
+      "field": "name",
+      "found": 2,
+      "kind": "oob_pointer",
+      "lossy": true,
+      "offset": 8,
+      "reason": "out of range: insufficient bytes"
+    }
+  ],
+  "errors": [],
+  "format": "UNKNOWN",
+  "metadata": {
+    "name": "Al",
+    "version": 1
+  },
+  "records": [
+    {
+      "name": "Al",
+      "version": 1
+    }
+  ],
+  "source_file": "damaged.bin",
+  "status": "unrecognized"
+}

@@ -1,0 +1,853 @@
+diff --git a/salvage_prototype/src/salvage/bytemap.py b/salvage_prototype/src/salvage/bytemap.py
+new file mode 100644
+index 0000000..c5759ff
+--- /dev/null
++++ b/salvage_prototype/src/salvage/bytemap.py
+@@ -0,0 +1,382 @@
++"""Byte coverage map: which bytes of an input were decoded, verified, damaged or left unexplained.
++
++Every input byte ends up in exactly one class, so the map answers "what did
++SALVAGE actually account for?" without trusting a plugin's own summary.
++
++Classes (highest priority first; a higher class wins where claims overlap):
++    damaged    bytes a plugin reported as damaged, truncated or failing validation
++    verified   bytes decoded AND confirmed by a checksum/validator that passed
++    decoded    bytes decoded into fields/records but not independently verified
++    header     bytes of the format's fixed header
++    unclaimed  bytes nobody explained (never guessed: shown with a hex preview)
++
++Where the claims come from:
++    1. ``plugin-declared``  - a plugin put ``_spans`` in ``Result.data`` (exact).
++    2. ``inferred-from-records`` - fallback for plugins without ``_spans``: each
++       record's raw bytes are located in the input by offset hint or content
++       match. Content matching can pick the wrong copy of repeated bytes, so it
++       is labelled as inferred in the output.
++
++Stdlib only. Nothing here may raise into the pipeline: callers wrap it, and the
++builder itself clamps every range to the file instead of trusting plugins.
++"""
++from __future__ import annotations
++
++import hashlib
++import html
++import json
++import math
++from collections import Counter
++from typing import Any, Iterable
++
++KINDS = ("damaged", "verified", "decoded", "header", "unclaimed")
++_PRIORITY = {"unclaimed": 0, "header": 1, "decoded": 2, "verified": 3, "damaged": 4}
++_PLUGIN_KINDS = {"header", "decoded", "verified", "damaged"}
++_MAX_SPANS = 20000
++_MAX_UNCLAIMED_LISTED = 200
++
++
++def span(start: int, end: int, kind: str, label: str = "") -> dict[str, Any]:
++    """Helper for plugins: declare that bytes [start, end) belong to ``kind``."""
++    return {"start": int(start), "end": int(end), "kind": kind, "label": label}
++
++
++# --------------------------------------------------------------------------- claims
++
++def _entropy(sample: bytes) -> float:
++    if not sample:
++        return 0.0
++    total = len(sample)
++    return -sum(c / total * math.log2(c / total) for c in Counter(sample).values())
++
++
++def _as_int(value: Any) -> int | None:
++    return value if isinstance(value, int) and not isinstance(value, bool) else None
++
++
++def _hex_bytes(value: Any) -> bytes | None:
++    if not isinstance(value, str) or len(value) < 2 or len(value) % 2:
++        return None
++    try:
++        return bytes.fromhex(value)
++    except ValueError:
++        return None
++
++
++def _claims_from_plugin(spans: Iterable[Any], size: int) -> list[dict[str, Any]]:
++    claims = []
++    for item in spans:
++        if not isinstance(item, dict):
++            continue
++        start, end = _as_int(item.get("start")), _as_int(item.get("end"))
++        kind = item.get("kind")
++        if start is None or end is None or kind not in _PLUGIN_KINDS:
++            continue
++        claims.append({"start": start, "end": end, "kind": kind,
++                       "label": str(item.get("label", "")), "source": "plugin-declared"})
++    return claims
++
++
++def _claims_from_records(data: bytes, records: list[Any]) -> list[dict[str, Any]]:
++    """Locate each record's raw bytes in the input. Best effort, labelled inferred."""
++    claims: list[dict[str, Any]] = []
++    cursor = 0
++    for position, rec in enumerate(records):
++        if not isinstance(rec, dict):
++            continue
++        index = rec.get("index", position)
++        validity = [v for k, v in rec.items() if k.endswith("_valid") and isinstance(v, bool)]
++        kind = "verified" if validity and all(validity) else "decoded"
++        if rec.get("complete") is False:
++            kind = "damaged"
++        located = False
++        for key, value in rec.items():
++            if not (key.endswith("raw_hex") or key.endswith("packed_hex")):
++                continue
++            raw = _hex_bytes(value)
++            if not raw:
++                continue
++            hints = [_as_int(rec.get("offset")), _as_int(rec.get("blob_offset")) if key == "packed_hex" else None]
++            start, source = -1, "content-match"
++            for hint in hints:
++                if hint is not None and 0 <= hint and data[hint:hint + len(raw)] == raw:
++                    start, source = hint, "offset-hint"
++                    break
++            if start < 0:
++                start = data.find(raw, cursor)
++            if start < 0:
++                continue
++            claims.append({"start": start, "end": start + len(raw), "kind": kind,
++                           "label": f"record[{index}] {key}", "source": f"inferred ({source})"})
++            cursor = max(cursor, start + len(raw))
++            located = True
++        # offset + length field pairs reported by the plugin itself
++        for key, value in rec.items():
++            offset = _as_int(value)
++            if offset is None or not key.endswith("_offset"):
++                continue
++            prefix = key[:-len("_offset")]
++            length = _as_int(rec.get(prefix + "_length"))
++            if length is None and prefix == "blob":
++                length = _as_int(rec.get("packed_length"))
++            if length and offset >= 0:
++                claims.append({"start": offset, "end": offset + length, "kind": kind,
++                               "label": f"record[{index}] {prefix}", "source": "inferred (offset+length fields)"})
++                located = True
++        if not located:
++            claims.append({"start": -1, "end": -1, "kind": kind, "label": f"record[{index}]",
++                           "source": "unlocated"})
++    return claims
++
++
++def _claims_from_damage(damage: list[Any]) -> list[dict[str, Any]]:
++    claims = []
++    for item in damage:
++        if not isinstance(item, dict):
++            continue
++        rng = item.get("byte_range")
++        if isinstance(rng, dict):
++            start, end = _as_int(rng.get("start")), _as_int(rng.get("end"))
++        else:
++            start = end = None
++        if start is None or end is None:
++            continue
++        claims.append({"start": start, "end": end, "kind": "damaged",
++                       "label": f"{item.get('field', 'damage')}: {item.get('reason', '')}".strip(": "),
++                       "source": "damage-report"})
++    return claims
++
++
++# --------------------------------------------------------------------------- sweep
++
++def _sweep(claims: list[dict[str, Any]], size: int) -> list[dict[str, Any]]:
++    """Resolve overlapping claims into non-overlapping, gap-free spans."""
++    points = {0, size}
++    for c in claims:
++        points.add(c["start"])
++        points.add(c["end"])
++    bounds = sorted(points)
++    starts: dict[int, list[int]] = {}
++    ends: dict[int, list[int]] = {}
++    for i, c in enumerate(claims):
++        starts.setdefault(c["start"], []).append(i)
++        ends.setdefault(c["end"], []).append(i)
++    active: set[int] = set()
++    spans: list[dict[str, Any]] = []
++    for a, b in zip(bounds, bounds[1:]):
++        active.difference_update(ends.get(a, ()))
++        active.update(starts.get(a, ()))
++        if active:
++            best = claims[max(active, key=lambda i: (_PRIORITY[claims[i]["kind"]], i))]
++            piece = {"start": a, "end": b, "kind": best["kind"], "label": best["label"], "source": best["source"]}
++        else:
++            piece = {"start": a, "end": b, "kind": "unclaimed", "label": "", "source": "none"}
++        prev = spans[-1] if spans else None
++        if prev and prev["kind"] == "unclaimed" and piece["kind"] == "unclaimed":
++            prev["end"] = b
++        else:
++            spans.append(piece)
++    return spans
++
++
++def _merge_if_huge(spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
++    if len(spans) <= _MAX_SPANS:
++        return spans
++    merged: list[dict[str, Any]] = []
++    for s in spans:
++        if merged and merged[-1]["kind"] == s["kind"]:
++            merged[-1]["end"] = s["end"]
++            merged[-1]["label"], merged[-1]["source"] = "merged spans", "merged"
++        else:
++            merged.append(dict(s))
++    return merged
++
++
++# --------------------------------------------------------------------------- build
++
++def build_bytemap(data: bytes, *, plugin_spans: Iterable[Any] | None = None,
++                  records: list[Any] | None = None, damage: list[Any] | None = None,
++                  header_length: int | None = None) -> dict[str, Any]:
++    """Return the coverage map for ``data``. Pure function, never trusts ranges."""
++    size = len(data)
++    damage_claims = _claims_from_damage(list(damage or []))
++    if plugin_spans is not None:
++        method = "plugin-declared"
++        claims = _claims_from_plugin(plugin_spans, size)
++    elif records:
++        method = "inferred-from-records"
++        claims = _claims_from_records(data, list(records))
++        if isinstance(header_length, int) and 0 < header_length:
++            claims.append({"start": 0, "end": header_length, "kind": "header",
++                           "label": "header (length declared by plugin)", "source": "plugin header_length"})
++    else:
++        method = "none"
++        claims = []
++        if isinstance(header_length, int) and 0 < header_length:
++            claims.append({"start": 0, "end": header_length, "kind": "header",
++                           "label": "header (length declared by plugin)", "source": "plugin header_length"})
++    claims += damage_claims
++
++    # Clamp to the file. Bytes a format expected beyond EOF are reported, not painted.
++    beyond = 0
++    unlocated = 0
++    usable = []
++    for c in claims:
++        if c["start"] < 0:
++            unlocated += 1
++            continue
++        lo, hi = max(0, c["start"]), min(size, c["end"])
++        if c["kind"] == "damaged" and c["end"] > size:
++            beyond += c["end"] - max(size, c["start"])
++        if lo < hi:
++            usable.append({**c, "start": lo, "end": hi})
++    spans = _merge_if_huge(_sweep(usable, size)) if size else []
++
++    totals = {k: 0 for k in KINDS}
++    for s in spans:
++        totals[s["kind"]] += s["end"] - s["start"]
++    explained = totals["verified"] + totals["decoded"] + totals["header"]
++    unclaimed = []
++    for s in spans:
++        if s["kind"] == "unclaimed" and len(unclaimed) < _MAX_UNCLAIMED_LISTED:
++            chunk = data[s["start"]:s["end"]]
++            unclaimed.append({"start": s["start"], "end": s["end"], "length": s["end"] - s["start"],
++                              "hex_preview": chunk[:32].hex(),
++                              "entropy_bits_per_byte": round(_entropy(chunk[:4096]), 3)})
++    return {
++        "size": size,
++        "sha256": hashlib.sha256(data).hexdigest(),
++        "method": method,
++        "totals": totals,
++        "explained_pct": round(100.0 * explained / size, 2) if size else 0.0,
++        "damaged_pct": round(100.0 * totals["damaged"] / size, 2) if size else 0.0,
++        "unclaimed_pct": round(100.0 * totals["unclaimed"] / size, 2) if size else 0.0,
++        "bytes_expected_beyond_eof": beyond,
++        "unlocated_records": unlocated,
++        "spans": spans,
++        "unclaimed": unclaimed,
++    }
++
++
++def report_ranges(bytemap: dict[str, Any]) -> list[dict[str, Any]]:
++    """Whole-file coverage as [{start, end, kind}] for report.json (adjacent same-kind spans merged)."""
++    merged: list[dict[str, Any]] = []
++    for s in bytemap.get("spans", []):
++        if merged and merged[-1]["kind"] == s["kind"] and merged[-1]["end"] == s["start"]:
++            merged[-1]["end"] = s["end"]
++        else:
++            merged.append({"start": s["start"], "end": s["end"], "kind": s["kind"]})
++    return merged
++
++
++# --------------------------------------------------------------------------- html
++
++_CSS = """
++:root{--bg:#fafaf7;--fg:#1d1d1b;--mut:#6b6b66;--card:#fff;--line:#dcdcd4;
++--verified:#2e7d32;--decoded:#8bc34a;--header:#4f7cac;--damaged:#c62828;--unclaimed:#9e9e9e;--on:#fff}
++@media (prefers-color-scheme:dark){:root{--bg:#161616;--fg:#e8e8e3;--mut:#9a9a94;--card:#1f1f1e;--line:#33332f;
++--verified:#43a047;--decoded:#7cb342;--header:#5b8fc7;--damaged:#ef5350;--unclaimed:#6f6f6a}}
++body{margin:0;padding:24px 16px;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,Segoe UI,Arial,sans-serif}
++main{max-width:1000px;margin:0 auto}h1{font-size:22px;margin:0 0 4px}.sub{color:var(--mut);margin:0 0 18px}
++section{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin:0 0 18px}
++h2{font-size:16px;margin:0 0 2px}.meta{color:var(--mut);font-size:13px;word-break:break-all}
++.bar{display:flex;height:22px;border-radius:4px;overflow:hidden;margin:10px 0;background:var(--unclaimed)}
++.bar i{display:block;min-width:1px}.k-verified{background:var(--verified)}.k-decoded{background:var(--decoded)}
++.k-header{background:var(--header)}.k-damaged{background:var(--damaged)}.k-unclaimed{background:var(--unclaimed)}
++.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;margin:4px 0 8px}
++.legend b{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:5px;vertical-align:-1px}
++pre.hex{font:12px/1.5 ui-monospace,Consolas,monospace;overflow-x:auto;margin:8px 0;padding:8px;border:1px solid var(--line);border-radius:6px}
++pre.hex .o{color:var(--mut)}pre.hex .a{color:var(--mut)}
++pre.hex .k-verified,pre.hex .k-decoded,pre.hex .k-header,pre.hex .k-damaged,pre.hex .k-unclaimed{background:none}
++pre.hex .k-verified{color:var(--verified);font-weight:600}pre.hex .k-decoded{color:var(--decoded);font-weight:600}
++pre.hex .k-header{color:var(--header);font-weight:600}
++pre.hex .k-damaged{color:var(--damaged);font-weight:700;text-decoration:underline}pre.hex .k-unclaimed{color:var(--unclaimed)}
++table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:4px 8px;border-top:1px solid var(--line);vertical-align:top}
++td.m{font-family:ui-monospace,Consolas,monospace}.note{color:var(--mut);font-size:13px}
++"""
++
++_HEX_LIMIT = 8192
++_LABELS = {"verified": "verified (checksum/validator passed)", "decoded": "decoded", "header": "header",
++           "damaged": "damaged / failed validation", "unclaimed": "unclaimed (unexplained)"}
++
++
++def _hex_dump(data: bytes, spans: list[dict[str, Any]]) -> str:
++    shown = data[:_HEX_LIMIT]
++    kind_at = bytearray(len(shown))
++    code = {k: i for i, k in enumerate(KINDS)}
++    for s in spans:
++        if s["start"] >= len(shown):
++            break
++        e = min(s["end"], len(shown))
++        kind_at[s["start"]:e] = bytes([code[s["kind"]]]) * (e - s["start"])
++    rows = []
++    for off in range(0, len(shown), 16):
++        parts, run_kind, run = [], None, []
++        for i in range(off, min(off + 16, len(shown))):
++            k = KINDS[kind_at[i]]
++            if k != run_kind and run:
++                parts.append(f'<span class="k-{run_kind}">{" ".join(run)}</span>')
++                run = []
++            run_kind = k
++            run.append(f"{shown[i]:02x}")
++        if run:
++            parts.append(f'<span class="k-{run_kind}">{" ".join(run)}</span>')
++        ascii_ = "".join(chr(b) if 32 <= b < 127 else "." for b in shown[off:off + 16])
++        rows.append(f'<span class="o">{off:08x}</span>  {" ".join(parts)}  <span class="a">|{html.escape(ascii_)}|</span>')
++    return "\n".join(rows)
++
++
++def render_html(entries: list[dict[str, Any]], inputs: dict[str, bytes] | None = None) -> str:
++    """Single offline report.html. ``inputs`` maps file name -> bytes for the hex view."""
++    inputs = inputs or {}
++    out = ['<!doctype html><html lang="en"><head><meta charset="utf-8">'
++           '<meta name="viewport" content="width=device-width,initial-scale=1">'
++           f'<title>SALVAGE byte coverage report</title><style>{_CSS}</style></head><body><main>',
++           "<h1>SALVAGE byte coverage report</h1>",
++           '<p class="sub">Every byte of each input is placed in one class. Nothing is guessed: '
++           "bytes no decoder could explain stay <b>unclaimed</b>.</p>",
++           '<div class="legend">' + "".join(
++               f'<span><b class="k-{k}"></b>{html.escape(_LABELS[k])}</span>' for k in KINDS) + "</div>"]
++    for entry in entries:
++        bm = entry["bytemap"]
++        name = str(entry.get("file_name", ""))
++        size = bm["size"]
++        out.append(f"<section><h2>{html.escape(name)}</h2>")
++        out.append(f'<div class="meta">{html.escape(str(entry.get("format", "")))} · status '
++                   f'{html.escape(str(entry.get("status", "")))} · {size} bytes · '
++                   f'sha256 {bm["sha256"]}</div>')
++        out.append(f'<div class="meta">explained {bm["explained_pct"]}% · damaged {bm["damaged_pct"]}% · '
++                   f'unclaimed {bm["unclaimed_pct"]}% · map method: {html.escape(bm["method"])}</div>')
++        if bm["bytes_expected_beyond_eof"]:
++            out.append(f'<div class="note">The format expected {bm["bytes_expected_beyond_eof"]} more byte(s) '
++                       "past the end of this file (truncation).</div>")
++        if bm["unlocated_records"]:
++            out.append(f'<div class="note">{bm["unlocated_records"]} record(s) could not be located '
++                       "in the file bytes and are not painted.</div>")
++        if size:
++            out.append('<div class="bar" role="img" aria-label="byte coverage bar">')
++            for s in bm["spans"]:
++                width = 100.0 * (s["end"] - s["start"]) / size
++                tip = f'0x{s["start"]:x}-0x{s["end"]:x} {s["kind"]} {s["label"]}'.strip()
++                out.append(f'<i class="k-{s["kind"]}" style="width:{width:.4f}%" title="{html.escape(tip)}"></i>')
++            out.append("</div>")
++        raw = inputs.get(name)
++        if raw:
++            out.append(f'<pre class="hex">{_hex_dump(raw, bm["spans"])}</pre>')
++            if len(raw) > _HEX_LIMIT:
++                out.append(f'<div class="note">Hex view shows the first {_HEX_LIMIT} of {len(raw)} bytes; '
++                           "the bar and tables cover the whole file.</div>")
++        interesting = [s for s in bm["spans"] if s["kind"] in ("damaged", "unclaimed")][:60]
++        if interesting:
++            out.append("<table><tr><th>Range</th><th>Class</th><th>Detail</th></tr>")
++            for s in interesting:
++                out.append(f'<tr><td class="m">0x{s["start"]:x}–0x{s["end"]:x} ({s["end"] - s["start"]} B)</td>'
++                           f'<td>{s["kind"]}</td><td>{html.escape(s["label"] or "no decoder claimed these bytes")}</td></tr>')
++            out.append("</table>")
++        out.append("</section>")
++    payload = json.dumps([{"file_name": e.get("file_name"), "format": e.get("format"),
++                           "status": e.get("status"), "bytemap": e["bytemap"]} for e in entries],
++                         sort_keys=True).replace("</", "<\\/")
++    out.append(f'<script type="application/json" id="bytemap-data">{payload}</script>')
++    out.append("</main></body></html>")
++    return "\n".join(out)
+diff --git a/salvage_prototype/src/salvage/cli.py b/salvage_prototype/src/salvage/cli.py
+index d395cdd..a7ff73b 100644
+--- a/salvage_prototype/src/salvage/cli.py
++++ b/salvage_prototype/src/salvage/cli.py
+@@ -5,6 +5,7 @@ import argparse
+ from pathlib import Path
+ from typing import Any
+ 
++from .bytemap import render_html, report_ranges
+ from .output import shape_failure, shape_failure_entry, write_json
+ from .pipeline import inspect_file
+ from .report import build_report
+@@ -20,7 +21,11 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
+     parser.add_argument("output_dir", help="Folder for JSON output")
+     parser.add_argument("--debug", action="store_true",
+                         help="Include rejected-format evidence and full analysis detail in the JSON")
++    parser.add_argument("--no-bytemap", action="store_true",
++                        help="Do not write the byte coverage report (report.html)")
+     debug = False
++    map_entries: list[dict[str, Any]] = []
++    map_inputs: dict[str, bytes] = {}
+     results: list[dict[str, Any]] = []
+     failures: list[dict[str, Any]] = []
+     output_dir: Path | None = None
+@@ -29,6 +34,7 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
+             args = parser.parse_args(argv)
+             input_dir, output_dir = Path(args.input_dir), Path(args.output_dir)
+             debug = bool(args.debug)
++            want_map = not args.no_bytemap
+         except BaseException as error:
+             # argparse normally raises SystemExit for malformed CLI arguments.
+             print(f"SALVAGE: invalid invocation: {type(error).__name__}: {error}")
+@@ -62,7 +68,8 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
+                     failures.append(_failure(entry, "inspect_entry", "entry is not a regular file (subdirectories are not traversed)"))
+                     continue
+                 try:
+-                    result = inspect_file(entry, registry, debug=debug)
++                    sink: dict[str, Any] = {}
++                    result = inspect_file(entry, registry, debug=debug, bytemap_sink=sink)
+                     if not isinstance(result, dict):
+                         raise TypeError("file processor did not return a result object")
+                 except Exception as error:
+@@ -76,6 +83,11 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
+                 ):
+                     failures.append(_failure(entry, "process_file", "; ".join(result.get("errors", [])) or "processing failed"))
+                 results.append(result)
++                if want_map and sink.get("_error"):
++                    print(f"SALVAGE: byte map skipped for {entry.name}: {sink['_error']}")
++                elif want_map and sink:
++                    map_entries.append({"file_name": entry.name, "format": result.get("format"),
++                                        "status": result.get("status"), "bytemap": sink})
+                 try:
+                     write_json(output_dir / f"{entry.name}.json", result)
+                 except Exception as error:
+@@ -86,11 +98,22 @@ def main(argv: list[str] | None = None, *, registry=None) -> int:
+ 
+         # Include per-file failures in the report's results as well as its
+         # dedicated failures list, so a report consumer cannot miss them.
+-        report = build_report(results, failures)
++        ranges = {m["file_name"]: report_ranges(m["bytemap"]) for m in map_entries} if want_map else None
++        report = build_report(results, failures, ranges)
+         try:
+             write_json(output_dir / "report.json", report)
+         except Exception as error:
+             print(f"SALVAGE: could not write report: {type(error).__name__}: {error}")
++        if want_map and map_entries:
++            try:
++                for item in map_entries:
++                    try:
++                        map_inputs[item["file_name"]] = (input_dir / item["file_name"]).read_bytes()[:8192]
++                    except Exception:
++                        pass
++                (output_dir / "report.html").write_text(render_html(map_entries, map_inputs), encoding="utf-8")
++            except Exception as error:
++                print(f"SALVAGE: could not write byte coverage report: {type(error).__name__}: {error}")
+         print(f"\nDone! Processed {len(results)} file(s); recorded {len(failures)} failure(s).")
+     except BaseException as error:
+         # Final guard to honor the CLI's zero-exit contract even for unexpected
+diff --git a/salvage_prototype/src/salvage/formats/real/aster.py b/salvage_prototype/src/salvage/formats/real/aster.py
+index 65809e0..629cde1 100644
+--- a/salvage_prototype/src/salvage/formats/real/aster.py
++++ b/salvage_prototype/src/salvage/formats/real/aster.py
+@@ -1,6 +1,7 @@
+ """ASTER records: fixed-size big-endian records with a deliberately misleading field."""
+ from __future__ import annotations
+ from ..base import Damage, FormatPlugin, Result
++from ...bytemap import span
+ 
+ MAGIC = b"ARCF"
+ HEADER_SIZE = 8
+@@ -38,11 +39,13 @@ class AsterRecordsPlugin(FormatPlugin):
+         version = int.from_bytes(data[4:6], "big")
+         count = int.from_bytes(data[6:8], "big")
+         records = []
++        spans = [span(0, HEADER_SIZE, "header", "magic, version, record count")]
+         cursor = HEADER_SIZE
+         for index in range(count):
+             start, end = cursor, cursor + RECORD_SIZE
+             raw = data[start:min(end, len(data))]
+             if len(raw) < RECORD_SIZE:
++                spans.append(span(start, start + len(raw), "damaged", f"records[{index}] truncated ({len(raw)}/{RECORD_SIZE} bytes)"))
+                 result.damage.append(Damage(f"records[{index}]", start, RECORD_SIZE, len(raw),
+                     "truncated fixed-size ASTER record", (start + len(raw), end), raw.hex()))
+                 records.append({"index": index, "item_id": None, "kind": None,
+@@ -64,12 +67,13 @@ class AsterRecordsPlugin(FormatPlugin):
+                 result.damage.append(Damage(f"records[{index}].code", start + 9, 3, 3,
+                     "record code contains non-printable/non-ASCII bytes", (start + 9, start + 12), raw[9:12].hex()))
+             records.append(record)
++            spans.append(span(start, end, "decoded", f"records[{index}]"))
+             cursor = end
+         if len(data) > cursor:
+             extra = data[cursor:]
+             result.damage.append(Damage("trailing_bytes", cursor, 0, len(extra),
+                 "bytes remain after declared fixed records", (cursor, len(data)), extra.hex()))
+-        result.data = {"version": version, "record_count": count, "record_size": RECORD_SIZE, "records": records}
++        result.data = {"version": version, "record_count": count, "record_size": RECORD_SIZE, "records": records, "_spans": spans}
+         result.records = [dict(item) for item in records]
+         if result.damage:
+             result.status = "partial" if records else "damaged"
+diff --git a/salvage_prototype/src/salvage/formats/real/crc_blocks.py b/salvage_prototype/src/salvage/formats/real/crc_blocks.py
+index 265ddf4..0b1bb9b 100644
+--- a/salvage_prototype/src/salvage/formats/real/crc_blocks.py
++++ b/salvage_prototype/src/salvage/formats/real/crc_blocks.py
+@@ -2,6 +2,7 @@
+ from __future__ import annotations
+ import zlib
+ from ..base import Damage, FormatPlugin, Result
++from ...bytemap import span
+ 
+ MAGIC = b"CRCB"
+ HEADER_SIZE = 7
+@@ -37,6 +38,7 @@ class CRCBlocksPlugin(FormatPlugin):
+         version = data[4]
+         count = int.from_bytes(data[5:7], "little")
+         blocks = []
++        spans = [span(0, HEADER_SIZE, "header", "magic, version, block count")]
+         cursor = HEADER_SIZE
+         for index in range(count):
+             if cursor + 2 > len(data):
+@@ -45,12 +47,14 @@ class CRCBlocksPlugin(FormatPlugin):
+                 break
+             payload_len = int.from_bytes(data[cursor:cursor+2], "little")
+             length_offset = cursor
++            spans.append(span(cursor, cursor + 2, "decoded", f"blocks[{index}].length"))
+             payload_offset = cursor + 2
+             payload_end = payload_offset + payload_len
+             crc_offset = payload_end
+             block_end = crc_offset + 4
+             payload = data[payload_offset:min(payload_end, len(data))]
+             if len(payload) < payload_len:
++                spans.append(span(payload_offset, payload_offset + len(payload), "damaged", f"blocks[{index}] truncated payload"))
+                 result.damage.append(Damage(f"blocks[{index}].payload", payload_offset + len(payload), payload_len, len(payload),
+                     "truncated CRCB block payload", (payload_offset + len(payload), payload_end), payload.hex()))
+                 blocks.append({"index": index, "length": payload_len, "payload_raw_hex": payload.hex(),
+@@ -69,6 +73,9 @@ class CRCBlocksPlugin(FormatPlugin):
+                     result.damage.append(Damage(f"blocks[{index}].crc32", crc_offset, 4, 4,
+                         f"CRC32 mismatch: stored={stored_crc}, calculated={calculated}",
+                         (crc_offset, block_end), data[crc_offset:block_end].hex()))
++            spans.append(span(payload_offset, payload_end, "verified" if crc_valid else "decoded", f"blocks[{index}].payload"))
++            if crc_valid is not None:
++                spans.append(span(crc_offset, block_end, "verified" if crc_valid else "decoded", f"blocks[{index}].crc32"))
+             sequence = int.from_bytes(payload[0:2], "little") if len(payload) >= 2 else None
+             reading = int.from_bytes(payload[2:6], "little", signed=True) if len(payload) >= 6 else None
+             label_len = payload[6] if len(payload) >= 7 else None
+@@ -96,7 +103,7 @@ class CRCBlocksPlugin(FormatPlugin):
+         if cursor < len(data) and len(blocks) == count:
+             result.damage.append(Damage("trailing_bytes", cursor, 0, len(data)-cursor,
+                 "bytes remain after declared blocks", (cursor, len(data)), data[cursor:].hex()))
+-        result.data = {"version": version, "block_count": count, "blocks": blocks}
++        result.data = {"version": version, "block_count": count, "blocks": blocks, "_spans": spans}
+         result.records = [dict(block) for block in blocks]
+         if result.damage:
+             result.status = "partial" if blocks else "damaged"
+diff --git a/salvage_prototype/src/salvage/formats/real/xidx.py b/salvage_prototype/src/salvage/formats/real/xidx.py
+index 8039e6f..e1ed786 100644
+--- a/salvage_prototype/src/salvage/formats/real/xidx.py
++++ b/salvage_prototype/src/salvage/formats/real/xidx.py
+@@ -1,6 +1,7 @@
+ """XIDX: big-endian offset table, count/value RLE blobs and XOR strings."""
+ from __future__ import annotations
+ from ..base import Damage, FormatPlugin, Result
++from ...bytemap import span
+ 
+ MAGIC = b"XIDX"
+ HEADER_SIZE = 8
+@@ -54,6 +55,7 @@ class XIDXPlugin(FormatPlugin):
+         version, count = data[4], data[5]
+         table_offset = int.from_bytes(data[6:8], "big")
+         entries = []
++        spans = [span(0, HEADER_SIZE, "header", "magic, version, entry count, index offset")]
+         table_end = table_offset + count * ENTRY_SIZE
+         if table_offset < HEADER_SIZE or table_end > len(data):
+             found = max(0, min(len(data), table_end) - max(0, table_offset))
+@@ -70,6 +72,7 @@ class XIDXPlugin(FormatPlugin):
+             string_offset = int.from_bytes(data[pos+6:pos+8], "big")
+             string_len, key = data[pos+8], data[pos+9]
+             blob_end = blob_offset + packed_len
++            spans.append(span(pos, pos + ENTRY_SIZE, "decoded", f"entries[{index}] index entry"))
+             packed = data[blob_offset:min(blob_end, len(data))] if blob_offset <= len(data) else b""
+             if blob_offset < table_end or blob_offset < 0 or blob_end > len(data):
+                 result.damage.append(Damage(f"entries[{index}].blob", blob_offset, packed_len, len(packed),
+@@ -91,12 +94,14 @@ class XIDXPlugin(FormatPlugin):
+                 label = None
+                 result.damage.append(Damage(f"entries[{index}].string", string_offset, string_len, len(encoded),
+                     "XOR-decoded string is invalid UTF-8", (string_offset, string_end), encoded.hex()))
++            spans.append(span(blob_offset, blob_end, "verified" if rle_error is None else "decoded", f"entries[{index}].blob (RLE)"))
++            spans.append(span(string_offset, string_end, "decoded", f"entries[{index}].label (XOR key {key})"))
+             entries.append({"index": index, "blob_offset": blob_offset, "packed_length": packed_len,
+                 "decoded_length": raw_len, "packed_hex": packed.hex(), "blob_hex": decoded.hex(),
+                 "blob_bytes": list(decoded), "label_offset": string_offset, "label_length": string_len,
+                 "xor_key": key, "label": label, "rle_valid": rle_error is None,
+                 "complete": rle_error is None and len(packed) == packed_len and label is not None})
+-        result.data = {"version": version, "blob_count": count, "index_offset": table_offset, "entries": entries}
++        result.data = {"version": version, "blob_count": count, "index_offset": table_offset, "entries": entries, "_spans": spans}
+         result.records = [dict(entry) for entry in entries]
+         if result.damage:
+             result.status = "partial" if entries else "damaged"
+diff --git a/salvage_prototype/src/salvage/output.py b/salvage_prototype/src/salvage/output.py
+index 46f6a6b..035a253 100644
+--- a/salvage_prototype/src/salvage/output.py
++++ b/salvage_prototype/src/salvage/output.py
+@@ -332,7 +332,8 @@ def shape_failure_entry(path: str, stage: str, error: BaseException | str) -> di
+     return {"path": str(path), "status": "failed", "stage": stage, "error": detail}
+ 
+ 
+-def shape_report(results: list[dict[str, Any]], failures: list[dict[str, Any]] | None = None) -> dict[str, Any]:
++def shape_report(results: list[dict[str, Any]], failures: list[dict[str, Any]] | None = None,
++                 byte_ranges: dict[str, list[dict[str, Any]]] | None = None) -> dict[str, Any]:
+     """Batch summary in the contract's report.json shape."""
+     failures = sorted(list(failures or []), key=lambda f: (str(f.get("path", "")), str(f.get("stage", "")), str(f.get("error", ""))))
+     results = sorted(results, key=lambda r: str(r.get("source_file", "")))
+@@ -355,7 +356,8 @@ def shape_report(results: list[dict[str, Any]], failures: list[dict[str, Any]] |
+                 # extras kept from the earlier design
+                 "confidence": item.get("confidence", 0.0),
+                 "counts": item.get("counts", dict(empty)),
+-                "byte_ranges": [d["byte_range"] for d in item.get("damage", []) if "byte_range" in d],
++                "byte_ranges": (byte_ranges or {}).get(item.get("source_file", ""))
++                               or [d["byte_range"] for d in item.get("damage", []) if "byte_range" in d],
+                 "warnings": [str(d.get("reason", "")) for d in item.get("damage", [])]
+                             + [str(e) for e in item.get("errors", [])],
+             }
+diff --git a/salvage_prototype/src/salvage/pipeline.py b/salvage_prototype/src/salvage/pipeline.py
+index 6dd7a35..a0c4790 100644
+--- a/salvage_prototype/src/salvage/pipeline.py
++++ b/salvage_prototype/src/salvage/pipeline.py
+@@ -5,12 +5,27 @@ from pathlib import Path
+ from typing import Any
+ from .formats.base import Result
+ from .formats.registry import PluginRegistry, default_registry
++from .bytemap import build_bytemap
+ from .identify import identify
+ from .output import shape_failure, shape_result
+ 
+ 
++def _fill_bytemap(sink: dict[str, Any], data: bytes, decoded: Any, plugin: Any, shaped: dict[str, Any]) -> None:
++    """Byte coverage map; failure here must never affect the recovery result."""
++    try:
++        raw = getattr(decoded, "data", None)
++        spans = raw.get("_spans") if isinstance(raw, dict) else None
++        header_length = getattr(plugin, "header_length", None)
++        sink.update(build_bytemap(data, plugin_spans=spans, records=shaped.get("records"),
++                                  damage=shaped.get("damage"),
++                                  header_length=header_length if isinstance(header_length, int) else None))
++    except Exception as error:
++        sink.clear()
++        sink["_error"] = f"{type(error).__name__}: {error}"
++
++
+ def inspect_bytes(file_name: str, data: bytes, registry: PluginRegistry | None = None,
+-                  debug: bool = False) -> dict[str, Any]:
++                  debug: bool = False, bytemap_sink: dict[str, Any] | None = None) -> dict[str, Any]:
+     registry = registry or default_registry()
+     try:
+         candidates = identify(data, registry)
+@@ -20,8 +35,11 @@ def inspect_bytes(file_name: str, data: bytes, registry: PluginRegistry | None =
+             decoded = plugin.decode(data)
+             if not isinstance(decoded, Result):
+                 raise TypeError("decoder did not return Result")
+-            return shape_result(file_name, decoded, fallback_format=plugin.name,
+-                                identification=candidates, debug=debug)
++            shaped = shape_result(file_name, decoded, fallback_format=plugin.name,
++                                  identification=candidates, debug=debug)
++            if bytemap_sink is not None:
++                _fill_bytemap(bytemap_sink, data, decoded, plugin, shaped)
++            return shaped
+         except Exception as error:
+             return shape_failure(file_name, plugin.name,
+                                  f"Decoder failed: {type(error).__name__}: {error}", field="decoder")
+@@ -31,10 +49,10 @@ def inspect_bytes(file_name: str, data: bytes, registry: PluginRegistry | None =
+ 
+ 
+ def inspect_file(file_path: Path, registry: PluginRegistry | None = None,
+-                 debug: bool = False) -> dict[str, Any]:
++                 debug: bool = False, bytemap_sink: dict[str, Any] | None = None) -> dict[str, Any]:
+     try:
+         data = file_path.read_bytes()
+     except Exception as error:
+         return shape_failure(file_path.name, "UNKNOWN",
+                              f"Could not read file: {type(error).__name__}: {error}", field="file_read")
+-    return inspect_bytes(file_path.name, data, registry, debug=debug)
++    return inspect_bytes(file_path.name, data, registry, debug=debug, bytemap_sink=bytemap_sink)
+diff --git a/salvage_prototype/src/salvage/report.py b/salvage_prototype/src/salvage/report.py
+index 9665373..68613f3 100644
+--- a/salvage_prototype/src/salvage/report.py
++++ b/salvage_prototype/src/salvage/report.py
+@@ -3,5 +3,6 @@ from typing import Any
+ from .output import shape_report
+ 
+ 
+-def build_report(results: list[dict[str, Any]], failures: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+-    return shape_report(results, failures)
++def build_report(results: list[dict[str, Any]], failures: list[dict[str, Any]] | None = None,
++                 byte_ranges: dict[str, list[dict[str, Any]]] | None = None) -> dict[str, Any]:
++    return shape_report(results, failures, byte_ranges)
+diff --git a/salvage_prototype/tests/golden/test_real_format_golden.py b/salvage_prototype/tests/golden/test_real_format_golden.py
+index d828406..e450812 100644
+--- a/salvage_prototype/tests/golden/test_real_format_golden.py
++++ b/salvage_prototype/tests/golden/test_real_format_golden.py
+@@ -40,7 +40,9 @@ class RealFormatGoldenTests(unittest.TestCase):
+                 self.assertEqual(result.format, truth["format"])
+                 self.assertEqual(result.status, "recovered")
+                 self.assertEqual(result.damage, [])
+-                self.assertEqual(result.data, truth["expected"])
++                # "_"-prefixed keys (e.g. "_spans" for the byte map) are internal, not part of the schema
++                public = {k: v for k, v in result.data.items() if not str(k).startswith("_")}
++                self.assertEqual(public, truth["expected"])
+ 
+     def test_registry_identifies_and_pipeline_decodes_all_three(self):
+         expected = {"aster_records.bin": "ASTER", "crc_blocks.bin": "CRC_BLOCKS", "xidx_archive.bin": "XIDX"}
+diff --git a/salvage_prototype/tests/test_bytemap.py b/salvage_prototype/tests/test_bytemap.py
+new file mode 100644
+index 0000000..d739f58
+--- /dev/null
++++ b/salvage_prototype/tests/test_bytemap.py
+@@ -0,0 +1,130 @@
++"""Byte coverage map: totals must add up, ranges are clamped, plugins and the CLI stay safe."""
++import hashlib
++import json
++import sys
++import tempfile
++import unittest
++from pathlib import Path
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
++
++from salvage.bytemap import build_bytemap, render_html, span
++from salvage.cli import main
++from salvage.pipeline import inspect_bytes
++
++ROOT = Path(__file__).resolve().parents[1]
++GEN = ROOT / "samples" / "generated"
++
++
++def _map(name, data=None):
++    data = data if data is not None else (GEN / name).read_bytes()
++    sink = {}
++    inspect_bytes(name, data, bytemap_sink=sink)
++    return data, sink
++
++
++class ByteMapTests(unittest.TestCase):
++    def test_totals_always_add_up_to_file_size_even_when_truncated(self):
++        for name in ("aster_records.bin", "crc_blocks.bin", "xidx_archive.bin"):
++            full = (GEN / name).read_bytes()
++            for n in range(len(full) + 1):
++                _, bm = _map(name, full[:n])
++                if not bm:
++                    continue
++                self.assertEqual(sum(bm["totals"].values()), n, (name, n))
++                covered = sum(s["end"] - s["start"] for s in bm["spans"])
++                self.assertEqual(covered, n, (name, n))
++                for a, b in zip(bm["spans"], bm["spans"][1:]):
++                    self.assertEqual(a["end"], b["start"])
++
++    def test_clean_file_is_fully_explained_and_hashed(self):
++        data, bm = _map("crc_blocks.bin")
++        self.assertEqual(bm["explained_pct"], 100.0)
++        self.assertEqual(bm["totals"]["damaged"], 0)
++        self.assertEqual(bm["sha256"], hashlib.sha256(data).hexdigest())
++
++    def test_corrupted_crc_bytes_are_marked_damaged(self):
++        data = bytearray((GEN / "crc_blocks.bin").read_bytes())
++        data[-3] ^= 0xFF
++        _, bm = _map("x", bytes(data))
++        self.assertEqual(bm["totals"]["damaged"], 4)
++        last = [s for s in bm["spans"] if s["kind"] == "damaged"][0]
++        self.assertEqual((last["start"], last["end"]), (len(data) - 4, len(data)))
++
++    def test_unknown_file_is_entirely_unclaimed_not_guessed(self):
++        _, bm = _map("junk.bin", bytes(range(200)))
++        self.assertEqual(bm["totals"]["unclaimed"], 200)
++        self.assertEqual(bm["explained_pct"], 0.0)
++
++    def test_truncation_reports_bytes_expected_beyond_eof(self):
++        data = (GEN / "aster_records.bin").read_bytes()[:30]
++        _, bm = _map("t", data)
++        self.assertGreater(bm["bytes_expected_beyond_eof"], 0)
++
++    def test_hostile_ranges_are_clamped_and_overlap_prefers_damage(self):
++        data = bytes(10)
++        bm = build_bytemap(data, plugin_spans=[span(-5, 4, "decoded"), span(2, 99, "verified"),
++                                               {"start": "x"}, "junk", span(3, 3, "decoded")],
++                           damage=[{"byte_range": {"start": 3, "end": 5}, "field": "f", "reason": "r"}])
++        self.assertEqual(sum(bm["totals"].values()), 10)
++        self.assertEqual(bm["totals"]["damaged"], 2)
++
++    def test_empty_file(self):
++        bm = build_bytemap(b"")
++        self.assertEqual(bm["size"], 0)
++        self.assertEqual(bm["spans"], [])
++
++    def test_record_inference_fallback_for_plugins_without_spans(self):
++        data = b"HEAD" + b"\x01\x02\x03\x04" + b"\x05\x06\x07\x08"
++        records = [{"index": 0, "raw_hex": "01020304", "complete": True},
++                   {"index": 1, "raw_hex": "05060708", "complete": True}]
++        bm = build_bytemap(data, records=records, header_length=4)
++        self.assertEqual(bm["method"], "inferred-from-records")
++        self.assertEqual(bm["totals"]["decoded"], 8)
++        self.assertEqual(bm["totals"]["header"], 4)
++
++    def test_html_is_offline_self_contained_and_escapes_names(self):
++        data, bm = _map("crc_blocks.bin")
++        page = render_html([{"file_name": "<b>x</b>.bin", "format": "F", "status": "s", "bytemap": bm}],
++                           {"<b>x</b>.bin": data})
++        self.assertNotIn("http://", page.replace("http://www.w3.org", ""))
++        self.assertNotIn("https://", page)
++        self.assertNotIn("<b>x</b>.bin", page.split('id="bytemap-data"')[0])
++        self.assertIn("&lt;b&gt;x&lt;/b&gt;.bin", page)
++
++    def test_cli_writes_report_html_and_output_is_deterministic(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            tmp = Path(tmp)
++            (tmp / "in").mkdir()
++            for name in ("aster_records.bin", "crc_blocks.bin", "xidx_archive.bin"):
++                (tmp / "in" / name).write_bytes((GEN / name).read_bytes())
++            self.assertEqual(main([str(tmp / "in"), str(tmp / "a")]), 0)
++            self.assertEqual(main([str(tmp / "in"), str(tmp / "b")]), 0)
++            self.assertTrue((tmp / "a" / "report.html").exists())
++            self.assertEqual((tmp / "a" / "report.html").read_bytes(), (tmp / "b" / "report.html").read_bytes())
++            self.assertEqual(main([str(tmp / "in"), str(tmp / "c"), "--no-bytemap"]), 0)
++            self.assertFalse((tmp / "c" / "report.html").exists())
++            # per-file JSON must be unchanged by the feature
++            self.assertEqual((tmp / "a" / "crc_blocks.bin.json").read_bytes(),
++                             (tmp / "c" / "crc_blocks.bin.json").read_bytes())
++
++    def test_report_json_byte_ranges_cover_whole_file(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            tmp = Path(tmp)
++            (tmp / "in").mkdir()
++            (tmp / "in" / "crc_blocks.bin").write_bytes((GEN / "crc_blocks.bin").read_bytes())
++            (tmp / "in" / "junk.bin").write_bytes(bytes(range(50)))
++            main([str(tmp / "in"), str(tmp / "out")])
++            files = {f["file"]: f for f in json.loads((tmp / "out" / "report.json").read_text())["files"]}
++            for name, size in (("crc_blocks.bin", 63), ("junk.bin", 50)):
++                ranges = files[name]["byte_ranges"]
++                self.assertTrue(ranges)
++                self.assertEqual(ranges[0]["start"], 0)
++                self.assertEqual(ranges[-1]["end"], size)
++                for a, b in zip(ranges, ranges[1:]):
++                    self.assertEqual(a["end"], b["start"])
++            self.assertEqual(files["junk.bin"]["byte_ranges"][0]["kind"], "unclaimed")
++
++
++if __name__ == "__main__":
++    unittest.main()

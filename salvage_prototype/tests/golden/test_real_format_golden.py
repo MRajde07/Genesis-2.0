@@ -40,7 +40,9 @@ class RealFormatGoldenTests(unittest.TestCase):
                 self.assertEqual(result.format, truth["format"])
                 self.assertEqual(result.status, "recovered")
                 self.assertEqual(result.damage, [])
-                self.assertEqual(result.data, truth["expected"])
+                # "_"-prefixed keys (e.g. "_spans" for the byte map) are internal, not part of the schema
+                public = {k: v for k, v in result.data.items() if not str(k).startswith("_")}
+                self.assertEqual(public, truth["expected"])
 
     def test_registry_identifies_and_pipeline_decodes_all_three(self):
         expected = {"aster_records.bin": "ASTER", "crc_blocks.bin": "CRC_BLOCKS", "xidx_archive.bin": "XIDX"}
