@@ -1,6 +1,7 @@
 """XIDX: big-endian offset table, count/value RLE blobs and XOR strings."""
 from __future__ import annotations
 from ..base import Damage, FormatPlugin, Result
+from ...bytemap import span
 
 MAGIC = b"XIDX"
 HEADER_SIZE = 8
@@ -54,6 +55,7 @@ class XIDXPlugin(FormatPlugin):
         version, count = data[4], data[5]
         table_offset = int.from_bytes(data[6:8], "big")
         entries = []
+        spans = [span(0, HEADER_SIZE, "header", "magic, version, entry count, index offset")]
         table_end = table_offset + count * ENTRY_SIZE
         if table_offset < HEADER_SIZE or table_end > len(data):
             found = max(0, min(len(data), table_end) - max(0, table_offset))
@@ -70,6 +72,7 @@ class XIDXPlugin(FormatPlugin):
             string_offset = int.from_bytes(data[pos+6:pos+8], "big")
             string_len, key = data[pos+8], data[pos+9]
             blob_end = blob_offset + packed_len
+            spans.append(span(pos, pos + ENTRY_SIZE, "decoded", f"entries[{index}] index entry"))
             packed = data[blob_offset:min(blob_end, len(data))] if blob_offset <= len(data) else b""
             if blob_offset < table_end or blob_offset < 0 or blob_end > len(data):
                 result.damage.append(Damage(f"entries[{index}].blob", blob_offset, packed_len, len(packed),
@@ -91,12 +94,14 @@ class XIDXPlugin(FormatPlugin):
                 label = None
                 result.damage.append(Damage(f"entries[{index}].string", string_offset, string_len, len(encoded),
                     "XOR-decoded string is invalid UTF-8", (string_offset, string_end), encoded.hex()))
+            spans.append(span(blob_offset, blob_end, "verified" if rle_error is None else "decoded", f"entries[{index}].blob (RLE)"))
+            spans.append(span(string_offset, string_end, "decoded", f"entries[{index}].label (XOR key {key})"))
             entries.append({"index": index, "blob_offset": blob_offset, "packed_length": packed_len,
                 "decoded_length": raw_len, "packed_hex": packed.hex(), "blob_hex": decoded.hex(),
                 "blob_bytes": list(decoded), "label_offset": string_offset, "label_length": string_len,
                 "xor_key": key, "label": label, "rle_valid": rle_error is None,
                 "complete": rle_error is None and len(packed) == packed_len and label is not None})
-        result.data = {"version": version, "blob_count": count, "index_offset": table_offset, "entries": entries}
+        result.data = {"version": version, "blob_count": count, "index_offset": table_offset, "entries": entries, "_spans": spans}
         result.records = [dict(entry) for entry in entries]
         if result.damage:
             result.status = "partial" if entries else "damaged"

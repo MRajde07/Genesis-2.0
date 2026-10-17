@@ -332,7 +332,8 @@ def shape_failure_entry(path: str, stage: str, error: BaseException | str) -> di
     return {"path": str(path), "status": "failed", "stage": stage, "error": detail}
 
 
-def shape_report(results: list[dict[str, Any]], failures: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def shape_report(results: list[dict[str, Any]], failures: list[dict[str, Any]] | None = None,
+                 byte_ranges: dict[str, list[dict[str, Any]]] | None = None) -> dict[str, Any]:
     """Batch summary in the contract's report.json shape."""
     failures = sorted(list(failures or []), key=lambda f: (str(f.get("path", "")), str(f.get("stage", "")), str(f.get("error", ""))))
     results = sorted(results, key=lambda r: str(r.get("source_file", "")))
@@ -355,7 +356,8 @@ def shape_report(results: list[dict[str, Any]], failures: list[dict[str, Any]] |
                 # extras kept from the earlier design
                 "confidence": item.get("confidence", 0.0),
                 "counts": item.get("counts", dict(empty)),
-                "byte_ranges": [d["byte_range"] for d in item.get("damage", []) if "byte_range" in d],
+                "byte_ranges": (byte_ranges or {}).get(item.get("source_file", ""))
+                               or [d["byte_range"] for d in item.get("damage", []) if "byte_range" in d],
                 "warnings": [str(d.get("reason", "")) for d in item.get("damage", [])]
                             + [str(e) for e in item.get("errors", [])],
             }

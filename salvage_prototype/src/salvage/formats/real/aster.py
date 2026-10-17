@@ -1,6 +1,7 @@
 """ASTER records: fixed-size big-endian records with a deliberately misleading field."""
 from __future__ import annotations
 from ..base import Damage, FormatPlugin, Result
+from ...bytemap import span
 
 MAGIC = b"ARCF"
 HEADER_SIZE = 8
@@ -38,11 +39,13 @@ class AsterRecordsPlugin(FormatPlugin):
         version = int.from_bytes(data[4:6], "big")
         count = int.from_bytes(data[6:8], "big")
         records = []
+        spans = [span(0, HEADER_SIZE, "header", "magic, version, record count")]
         cursor = HEADER_SIZE
         for index in range(count):
             start, end = cursor, cursor + RECORD_SIZE
             raw = data[start:min(end, len(data))]
             if len(raw) < RECORD_SIZE:
+                spans.append(span(start, start + len(raw), "damaged", f"records[{index}] truncated ({len(raw)}/{RECORD_SIZE} bytes)"))
                 result.damage.append(Damage(f"records[{index}]", start, RECORD_SIZE, len(raw),
                     "truncated fixed-size ASTER record", (start + len(raw), end), raw.hex()))
                 records.append({"index": index, "item_id": None, "kind": None,
@@ -64,12 +67,13 @@ class AsterRecordsPlugin(FormatPlugin):
                 result.damage.append(Damage(f"records[{index}].code", start + 9, 3, 3,
                     "record code contains non-printable/non-ASCII bytes", (start + 9, start + 12), raw[9:12].hex()))
             records.append(record)
+            spans.append(span(start, end, "decoded", f"records[{index}]"))
             cursor = end
         if len(data) > cursor:
             extra = data[cursor:]
             result.damage.append(Damage("trailing_bytes", cursor, 0, len(extra),
                 "bytes remain after declared fixed records", (cursor, len(data)), extra.hex()))
-        result.data = {"version": version, "record_count": count, "record_size": RECORD_SIZE, "records": records}
+        result.data = {"version": version, "record_count": count, "record_size": RECORD_SIZE, "records": records, "_spans": spans}
         result.records = [dict(item) for item in records]
         if result.damage:
             result.status = "partial" if records else "damaged"

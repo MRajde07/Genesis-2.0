@@ -1,0 +1,268 @@
+{
+  "failures": [],
+  "files": [
+    {
+      "byte_ranges": [
+        {
+          "end": 6,
+          "kind": "header",
+          "start": 0
+        },
+        {
+          "end": 8,
+          "kind": "unclaimed",
+          "start": 6
+        }
+      ],
+      "confidence": 1.0,
+      "counts": {
+        "records_damaged": 1,
+        "records_lost": 0,
+        "records_recovered": 0
+      },
+      "damage": 1,
+      "file": "damaged.bin",
+      "format": "UNKNOWN",
+      "records": 1,
+      "status": "unrecognized",
+      "warnings": [
+        "out of range: insufficient bytes"
+      ]
+    },
+    {
+      "byte_ranges": [
+        {
+          "end": 6,
+          "kind": "header",
+          "start": 0
+        },
+        {
+          "end": 9,
+          "kind": "unclaimed",
+          "start": 6
+        }
+      ],
+      "confidence": 1.0,
+      "counts": {
+        "records_damaged": 0,
+        "records_lost": 0,
+        "records_recovered": 1
+      },
+      "damage": 0,
+      "file": "student.bin",
+      "format": "UNKNOWN",
+      "records": 1,
+      "status": "unrecognized",
+      "warnings": []
+    },
+    {
+      "byte_ranges": [
+        {
+          "end": 6,
+          "kind": "header",
+          "start": 0
+        },
+        {
+          "end": 292,
+          "kind": "unclaimed",
+          "start": 6
+        },
+        {
+          "end": 293,
+          "kind": "decoded",
+          "start": 292
+        },
+        {
+          "end": 304,
+          "kind": "unclaimed",
+          "start": 293
+        },
+        {
+          "end": 305,
+          "kind": "decoded",
+          "start": 304
+        },
+        {
+          "end": 316,
+          "kind": "unclaimed",
+          "start": 305
+        },
+        {
+          "end": 317,
+          "kind": "decoded",
+          "start": 316
+        },
+        {
+          "end": 349,
+          "kind": "unclaimed",
+          "start": 317
+        },
+        {
+          "end": 357,
+          "kind": "decoded",
+          "start": 349
+        },
+        {
+          "end": 402,
+          "kind": "unclaimed",
+          "start": 357
+        },
+        {
+          "end": 410,
+          "kind": "decoded",
+          "start": 402
+        },
+        {
+          "end": 455,
+          "kind": "unclaimed",
+          "start": 410
+        },
+        {
+          "end": 463,
+          "kind": "decoded",
+          "start": 455
+        },
+        {
+          "end": 508,
+          "kind": "unclaimed",
+          "start": 463
+        },
+        {
+          "end": 516,
+          "kind": "decoded",
+          "start": 508
+        },
+        {
+          "end": 561,
+          "kind": "unclaimed",
+          "start": 516
+        },
+        {
+          "end": 569,
+          "kind": "decoded",
+          "start": 561
+        },
+        {
+          "end": 614,
+          "kind": "unclaimed",
+          "start": 569
+        },
+        {
+          "end": 622,
+          "kind": "decoded",
+          "start": 614
+        },
+        {
+          "end": 667,
+          "kind": "unclaimed",
+          "start": 622
+        },
+        {
+          "end": 675,
+          "kind": "decoded",
+          "start": 667
+        },
+        {
+          "end": 720,
+          "kind": "unclaimed",
+          "start": 675
+        },
+        {
+          "end": 728,
+          "kind": "decoded",
+          "start": 720
+        },
+        {
+          "end": 773,
+          "kind": "unclaimed",
+          "start": 728
+        },
+        {
+          "end": 781,
+          "kind": "decoded",
+          "start": 773
+        },
+        {
+          "end": 826,
+          "kind": "unclaimed",
+          "start": 781
+        },
+        {
+          "end": 834,
+          "kind": "decoded",
+          "start": 826
+        },
+        {
+          "end": 852,
+          "kind": "unclaimed",
+          "start": 834
+        }
+      ],
+      "confidence": 1.0,
+      "counts": {
+        "records_damaged": 0,
+        "records_lost": 0,
+        "records_recovered": 33
+      },
+      "damage": 0,
+      "file": "testLotus123.wks",
+      "format": "UNKNOWN",
+      "records": 33,
+      "status": "unrecognized",
+      "warnings": [
+        "Unrecognized WKS record opcode 0x0002 at offset 18; raw body preserved",
+        "Unrecognized WKS record opcode 0x0003 at offset 23; raw body preserved",
+        "Unrecognized WKS record opcode 0x002f at offset 28; raw body preserved",
+        "Unrecognized WKS record opcode 0x001a at offset 33; raw body preserved",
+        "Unrecognized WKS record opcode 0x0025 at offset 45; raw body preserved",
+        "Unrecognized WKS record opcode 0x0026 at offset 50; raw body preserved",
+        "Unrecognized WKS record opcode 0x0027 at offset 55; raw body preserved",
+        "Unrecognized WKS record opcode 0x0028 at offset 60; raw body preserved",
+        "Unrecognized WKS record opcode 0x0030 at offset 74; raw body preserved",
+        "Unrecognized WKS record opcode 0x002a at offset 79; raw body preserved",
+        "Unrecognized WKS record opcode 0x001c at offset 99; raw body preserved",
+        "Unrecognized WKS record opcode 0x0018 at offset 111; raw body preserved",
+        "Unrecognized WKS record opcode 0x0019 at offset 140; raw body preserved",
+        "Unrecognized WKS record opcode 0x001b at offset 169; raw body preserved",
+        "Unrecognized WKS record opcode 0x001d at offset 181; raw body preserved",
+        "Unrecognized WKS record opcode 0x0023 at offset 194; raw body preserved",
+        "Unrecognized WKS record opcode 0x0020 at offset 207; raw body preserved",
+        "Unrecognized WKS record opcode 0x0024 at offset 227; raw body preserved",
+        "Unrecognized WKS record opcode 0x0004 at offset 232; raw body preserved",
+        "Unrecognized WKS record opcode 0x0005 at offset 237; raw body preserved",
+        "Unrecognized WKS record opcode 0x0007 at offset 242; raw body preserved",
+        "Unrecognized WKS record opcode 0x0029 at offset 277; raw body preserved"
+      ]
+    },
+    {
+      "byte_ranges": [],
+      "confidence": 0.0055,
+      "counts": {
+        "records_damaged": 0,
+        "records_lost": 0,
+        "records_recovered": 0
+      },
+      "damage": 0,
+      "file": "unkown.bin",
+      "format": "UNKNOWN",
+      "records": 0,
+      "status": "unrecognized",
+      "warnings": [
+        "Format not recognised; heuristic summary only, nothing decoded"
+      ]
+    }
+  ],
+  "files_processed": 4,
+  "records_damaged": 1,
+  "records_lost": 0,
+  "records_recovered": 34,
+  "tool": "SALVAGE",
+  "tool_version": "0.1.0",
+  "totals": {
+    "failed": 0,
+    "ok": 0,
+    "partial": 0,
+    "unrecognized": 4,
+    "unsupported": 0
+  }
+}
