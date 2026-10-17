@@ -1,102 +1,105 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "SALVAGE batch report",
+  "description": "SALVAGE report.json output contract. Totals count files by status, not records. Compatible with SALVAGE's built-in subset validator.",
   "type": "object",
   "required": [
-    "tool",
-    "files_processed",
-    "status_counts",
-    "records_recovered",
-    "records_damaged",
-    "records_lost",
-    "failures",
-    "files"
+    "tool_version",
+    "files",
+    "totals"
   ],
   "properties": {
-    "tool": {
-      "type": "string"
-    },
-    "files_processed": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "status_counts": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "integer",
-        "minimum": 0
-      }
-    },
-    "records_recovered": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "records_damaged": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "records_lost": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "failures": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
+    "tool_version": {
+      "type": "string",
+      "minLength": 1
     },
     "files": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": [
-          "file_name",
-          "format",
-          "confidence",
-          "status",
-          "counts",
-          "warnings",
-          "byte_ranges"
-        ],
         "properties": {
-          "file_name": {
-            "type": "string"
+          "file": {
+            "type": "string",
+            "minLength": 1
           },
           "format": {
-            "type": "string"
-          },
-          "confidence": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 1
-          },
-          "status": {
+            "type": "string",
             "enum": [
-              "recovered",
-              "partial",
-              "damaged",
-              "unsupported",
-              "error"
+              "LIBRA-98",
+              "LABLOG",
+              "VAULT",
+              "WKS",
+              "WPD",
+              "BRAVO",
+              "CVT",
+              "EBCDIC-DUMP",
+              "WAD",
+              "PAK",
+              "UNKNOWN"
             ]
           },
-          "counts": {
-            "type": "object"
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "partial",
+              "unsupported",
+              "unrecognized",
+              "failed"
+            ]
           },
-          "warnings": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
+          "records": {
+            "type": "integer",
+            "minimum": 0
           },
-          "byte_ranges": {
-            "type": "array",
-            "items": {
-              "type": "object"
-            }
+          "damage": {
+            "type": "integer",
+            "minimum": 0
           }
-        }
+        },
+        "required": [
+          "file",
+          "format",
+          "status",
+          "records",
+          "damage"
+        ],
+        "additionalProperties": true
       }
+    },
+    "totals": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "partial": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unsupported": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unrecognized": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "ok",
+        "partial",
+        "unsupported",
+        "unrecognized",
+        "failed"
+      ],
+      "additionalProperties": true
     }
   },
-  "additionalProperties": false
+  "additionalProperties": true
 }
